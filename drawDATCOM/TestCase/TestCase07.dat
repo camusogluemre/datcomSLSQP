@@ -1,0 +1,44 @@
+DIM M
+PART
+DERIV DEG
+DUMP ALL
+DAMP
+ $FLTCON LOOP=2.0,
+         NMACH=1.0, MACH(1)=0.13,
+         NALT=1.0, ALT(1)=0.0,
+         NALPHA=20.0, 
+         ALSCHD(1)= -16.0, -8.0, -6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 8.0, 9.0,
+             10.0, 12.0, 14.0, 16.0, 18.0, 19.0, 20.0, 21.0, 22.0, 30.0,
+         STMACH=0.6, TSMACH=1.4, TR=1.0$
+ $OPTINS SREF=13.285, CBARR=1.583, BLREF=9.0, ROUGFC=0.16E-3$
+ $SYNTHS XCG=0.68, ZCG=0.16, 
+         XW=-0.76,  ZW=-0.075,  ALIW=0.0,
+         XH=3.256,  ZH=0.60,    ALIH=-2.0, 
+         XV=3.73,  ZV=0.618,
+         XVF=3.73, ZVF=0.618,
+         SCALE=1.0, VERTUP=.TRUE.$
+ $BODY NX=7.0,
+       X(1)=-1.880,-1.666,-0.751,-0.261, 0.335, 0.997,4.166,
+       R(1)= 0.161, 0.360, 0.455, 0.640, 0.629, 0.469,0.101,
+       ZU(1)=0.585, 0.680, 0.752, 1.100, 1.100, 0.830,0.506,
+       ZL(1)=0.255,-0.044,-0.163,-0.177,-0.163,-0.117,0.302,
+       BNOSE=1.0, BLN=0.01,
+       BTAIL=1.0, BLA=0.06,
+       ITYPE=1.0, METHOD=1.0$
+ $WGPLNF CHRDR=1.583,   CHRDTP=1.583,
+         SSPN=4.451,  SSPNE=4.434,
+         SAVSI=0.0,
+         CHSTAT=0.0, TWISTA=-3.0,
+         DHDADI=0.0,
+         TYPE=1.0$
+NACA W 5 43013
+NACA H 5 43013
+ $HTPLNF CHRDR=1.034, CHRDTP=0.581,
+         SSPN=1.186, SSPNE=1.126,
+         SAVSI=0.0,
+         CHSTAT=0.25, TWISTA=0.0,
+         DHDADI=0.0,
+         TYPE=1.0$
+ $TVTPAN BVP=0.511, BV=1.023, BDV=0.269, BH=2.346,
+         SV=0.449,VLP=3.700,ZP=0.500$
+CASEID TOTAL: Ercoupe 415c Aircraft

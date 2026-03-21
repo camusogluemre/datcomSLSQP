@@ -1,0 +1,73 @@
+
+*  This was sent to me, but I haven't checked anything in it. Also, it
+* doesn't have any control surfaces defined.
+* Bill Galbraith  2/28/05
+*
+* 11/1/07  Chuck Eastlake from ERAU suggested cutting fuselage radius in 
+* half. He reported coefficients look close to the aircraft.
+
+
+DIM FT
+CASEID we set it below based on the configuration
+ $FLTCON NMACH=1.0$
+ $FLTCON MACH(1)=0.6$
+ $FLTCON NALPHA=20.0$
+ $FLTCON ALSCHD(1)=-9.,-8.,-7.,-6.,-5.,-4.,-3.,-2.,-1.,0.,1.,2.,
+   3.,4.,5.,6.,7.,8.,9.,10.$
+ $FLTCON NALT=1.0$
+ $FLTCON ALT(1)=35000.0$
+ $FLTCON LOOP=2.0$
+* $FLTCON WT=8000.0$	Removed for compatibility with Matlab
+ $OPTINS SREF=235.0$
+ $OPTINS CBARR=6.3$
+ $OPTINS BLREF=37.5$
+ $SYNTHS XCG=8.25$
+ $SYNTHS ZCG=-1.0$
+ $SYNTHS XW=6.25$
+ $SYNTHS ZW=-2.33$
+ $SYNTHS ALIW=1.0$
+ $SYNTHS XH=22.8$
+ $SYNTHS ZH=1.06$
+ $SYNTHS ALIH=2.0$
+ $SYNTHS XV=23.4$
+ $SYNTHS ZV=0.0$
+ $BODY BNOSE=2.0$
+ $BODY BLN=2.0$
+ $BODY NX=6.0$
+ $BODY X(1)=-3.0, -0.75, 2.0, 8.7, 20.0, 27.0$
+*$BODY R(1)=0.1, 1.25, 2.5, 3.0, 3.0, 0.4$
+ $BODY R(1)=0.05, 0.625, 1.25, 1.5, 1.5, 0.2$
+SAVE
+
+NACA-W-6-63A216
+ $WGPLNF CHRDTP=4.0$
+ $WGPLNF SSPNE=16.25$
+ $WGPLNF SSPN=18.75$
+ $WGPLNF CHRDR=8.67$
+ $WGPLNF SAVSI=0.0$
+ $WGPLNF DHDADI=5.0$
+ $WGPLNF TYPE=1.0$
+ $WGPLNF TWISTA=-2.0$
+SAVE
+
+NACA-H-6-63A014
+ $HTPLNF CHRDTP=2.5$
+ $HTPLNF SSPNE=5.7$
+ $HTPLNF SSPN=6.6$
+ $HTPLNF CHRDR=4.5$
+ $HTPLNF SAVSI=0.0$
+ $HTPLNF TYPE=1.0$
+SAVE
+
+NACA-V-6-63A014
+ $VTPLNF CHRDTP=2.75$
+ $VTPLNF SSPNE=5.8$
+ $VTPLNF SSPN=5.8$
+ $VTPLNF CHRDR=5.9$
+ $VTPLNF TYPE=1.0$
+SAVE
+
+DAMP
+DERIV RAD
+CASEID TOTAL: P-51D Mustang Aircraft
+
