@@ -3,7 +3,7 @@ DIM M
  $FLTCON NMACH=1.0, MACH(1)=0.3, STMACH=0.99, TSMACH=1.01,
  RNNUB(1)=43914000.0, NALPHA=1.0, ALSCHD(1)=10.0,
  NALT=1.0, ALT(1)=0.0, WT=117000.0, LOOP=1.00$
- $OPTINS SREF=10.0,$
+ $OPTINS SREF=27.87,$
  $SYNTHS XCG=5.0, ZCG=0.0, XW=5.528, ZW=0.227, ALIW=-2.0,                                                      
  XH=10.894, ZH=0.366, ALIH=0.0, XV=9.551, ZV=0.017,$
  $BODY NX=11.0,                                                               

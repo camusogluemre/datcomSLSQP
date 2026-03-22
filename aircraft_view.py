@@ -422,12 +422,14 @@ ACCENT   = '#2ea043'
 ACCENT2  = '#388bfd'
 
 
-def get_figure(dat_path, title="Aircraft Three-View", figsize=(13, 9)):
+def get_figure(dat_path, title="Aircraft Three-View", figsize=(13, 9),
+               dim_system='M'):
     """
     Parse dat_path and return a matplotlib Figure with the three-view
     drawing plus airfoil cross-sections.  Suitable for embedding in Tk.
     """
     geo = parse_dat_for_view(dat_path)
+    _u = 'm' if dim_system == 'M' else 'ft'
 
     fig = plt.figure(figsize=figsize, facecolor=DARK_BG)
     fig.suptitle(title, color=COL_EDGE, fontsize=11,
@@ -445,12 +447,12 @@ def get_figure(dat_path, title="Aircraft Three-View", figsize=(13, 9)):
         ax.grid(True, color='#30363d', linewidth=0.4)
         return ax
 
-    ax_top   = _ax([0.05, 0.42, 0.55, 0.52], 'x (m)', 'y (m)',   'Top View')
-    ax_side  = _ax([0.05, 0.05, 0.55, 0.33], 'x (m)', 'z (m)',   'Side View')
-    ax_front = _ax([0.63, 0.05, 0.34, 0.33], 'y (m)', 'z (m)',   'Front View')
-    ax_wafl  = _ax([0.63, 0.75, 0.34, 0.18], 'x/c',   'y/c',     'Wing Airfoil')
-    ax_hafl  = _ax([0.63, 0.55, 0.34, 0.16], 'x/c',   'y/c',     'H-Tail Airfoil')
-    ax_vafl  = _ax([0.63, 0.42, 0.34, 0.10], 'x/c',   'y/c',     'V-Tail Airfoil')
+    ax_top   = _ax([0.05, 0.42, 0.55, 0.52], f'x ({_u})', f'y ({_u})', 'Top View')
+    ax_side  = _ax([0.05, 0.05, 0.55, 0.33], f'x ({_u})', f'z ({_u})', 'Side View')
+    ax_front = _ax([0.63, 0.05, 0.34, 0.33], f'y ({_u})', f'z ({_u})', 'Front View')
+    ax_wafl  = _ax([0.63, 0.75, 0.34, 0.18], 'x/c',       'y/c',       'Wing Airfoil')
+    ax_hafl  = _ax([0.63, 0.55, 0.34, 0.16], 'x/c',       'y/c',       'H-Tail Airfoil')
+    ax_vafl  = _ax([0.63, 0.42, 0.34, 0.10], 'x/c',       'y/c',       'V-Tail Airfoil')
 
     def fill_top(ax, x, y, color, alpha=0.55):
         # mirror about y=0 for both wings
@@ -606,13 +608,15 @@ def get_figure(dat_path, title="Aircraft Three-View", figsize=(13, 9)):
 def get_figure_sidebyside(dat_before, dat_after,
                            label_left="Before",
                            label_right="After (Optimized)",
-                           figsize=(18, 8)):
+                           figsize=(18, 8),
+                           dim_system='M'):
     """
     Produce a single matplotlib Figure with two three-view drawings
     side-by-side: left = dat_before, right = dat_after.
     """
     geo_b = parse_dat_for_view(dat_before)
     geo_a = parse_dat_for_view(dat_after)
+    _u = 'm' if dim_system == 'M' else 'ft'
 
     fig = plt.figure(figsize=figsize, facecolor=DARK_BG)
 
@@ -639,12 +643,12 @@ def get_figure_sidebyside(dat_before, dat_after,
     def make_column_axes(ox):
         """ox = left offset of column (0.02 or 0.52)"""
         w = 0.44
-        ax_top   = _ax(ox,       0.38, w*0.62, 0.55, 'x','y',  'Top View')
-        ax_side  = _ax(ox,       0.04, w*0.62, 0.30, 'x','z',  'Side View')
-        ax_front = _ax(ox+w*0.65,0.04, w*0.33, 0.30, 'y','z',  'Front View')
-        ax_wafl  = _ax(ox+w*0.65,0.74, w*0.33, 0.17, 'x/c','', 'Wing Afl')
-        ax_hafl  = _ax(ox+w*0.65,0.56, w*0.33, 0.14, 'x/c','', 'H-Tail Afl')
-        ax_vafl  = _ax(ox+w*0.65,0.45, w*0.33, 0.08, 'x/c','', 'V-Tail Afl')
+        ax_top   = _ax(ox,       0.38, w*0.62, 0.55, f'x ({_u})', f'y ({_u})', 'Top View')
+        ax_side  = _ax(ox,       0.04, w*0.62, 0.30, f'x ({_u})', f'z ({_u})', 'Side View')
+        ax_front = _ax(ox+w*0.65,0.04, w*0.33, 0.30, f'y ({_u})', f'z ({_u})', 'Front View')
+        ax_wafl  = _ax(ox+w*0.65,0.74, w*0.33, 0.17, 'x/c', '',               'Wing Afl')
+        ax_hafl  = _ax(ox+w*0.65,0.56, w*0.33, 0.14, 'x/c', '',               'H-Tail Afl')
+        ax_vafl  = _ax(ox+w*0.65,0.45, w*0.33, 0.08, 'x/c', '',               'V-Tail Afl')
         return ax_top, ax_side, ax_front, ax_wafl, ax_hafl, ax_vafl
 
     axes_b = make_column_axes(0.02)
@@ -764,6 +768,172 @@ def _draw_geometry(geo, ax_top, ax_side, ax_front,
     for ax in [ax_top, ax_side, ax_front, ax_wafl, ax_hafl, ax_vafl]:
         ax.set_aspect('equal', adjustable='datalim')
     ax_top.invert_xaxis()
+
+
+def get_figure_overlay(dat_before, dat_after,
+                        label_before="Before",
+                        label_after="After (Optimized)",
+                        figsize=(13, 9),
+                        dim_system='M'):
+    """
+    Produce a single matplotlib Figure with before and after aircraft
+    geometry drawn on the SAME axes (overlaid).
+    """
+    geo_b = parse_dat_for_view(dat_before)
+    geo_a = parse_dat_for_view(dat_after)
+    _u = 'm' if dim_system == 'M' else 'ft'
+
+    # ── Colour scheme ──────────────────────────────────────────────────
+    # Before: original muted blues (lower alpha)
+    B_BODY = '#8baac8'; B_WING = '#4fc3f7'; B_HTP = '#81c784'; B_VTP = '#ffb74d'
+    B_EDGE = '#6688aa'; B_ALPHA_FILL = 0.22; B_ALPHA_LINE = 0.55
+
+    # After: vivid warm reds/oranges (clearly different)
+    A_BODY = '#e06c75'; A_WING = '#ff6b6b'; A_HTP = '#ff9f43'; A_VTP = '#f9ca24'
+    A_EDGE = '#ff4757'; A_ALPHA_FILL = 0.30; A_ALPHA_LINE = 0.90
+
+    fig = plt.figure(figsize=figsize, facecolor=DARK_BG)
+    fig.suptitle(f"Overlay:  {label_before}  vs  {label_after}",
+                 color=COL_EDGE, fontsize=11, fontfamily='monospace', y=0.98)
+
+    def _ax(rect, xlabel='', ylabel='', title=''):
+        ax = fig.add_axes(rect, facecolor=DARK_AX)
+        ax.tick_params(colors=COL_EDGE, labelsize=7)
+        for spine in ax.spines.values():
+            spine.set_edgecolor('#30363d')
+        ax.set_xlabel(xlabel, color=COL_EDGE, fontsize=7)
+        ax.set_ylabel(ylabel, color=COL_EDGE, fontsize=7)
+        ax.set_title(title,   color=COL_EDGE, fontsize=8,
+                     fontfamily='monospace')
+        ax.grid(True, color='#30363d', linewidth=0.4)
+        return ax
+
+    ax_top   = _ax([0.05, 0.42, 0.55, 0.52], f'x ({_u})', f'y ({_u})', 'Top View')
+    ax_side  = _ax([0.05, 0.05, 0.55, 0.33], f'x ({_u})', f'z ({_u})', 'Side View')
+    ax_front = _ax([0.63, 0.05, 0.34, 0.33], f'y ({_u})', f'z ({_u})', 'Front View')
+    ax_wafl  = _ax([0.63, 0.75, 0.34, 0.18], 'x/c',       'y/c',       'Wing Airfoil')
+    ax_hafl  = _ax([0.63, 0.55, 0.34, 0.16], 'x/c',       'y/c',       'H-Tail Airfoil')
+    ax_vafl  = _ax([0.63, 0.42, 0.34, 0.10], 'x/c',       'y/c',       'V-Tail Airfoil')
+
+    def _draw_overlay(geo,
+                      col_body, col_wing, col_htp, col_vtp, col_edge,
+                      alpha_fill, alpha_line, lw=0.9):
+        """Draw one aircraft's geometry onto the shared axes."""
+
+        def fill_top(ax, x, y, color):
+            ax.fill(np.concatenate([x, x[::-1]]),
+                    np.concatenate([y, -y[::-1]]),
+                    color=color, alpha=alpha_fill, linewidth=0)
+            ax.plot(np.concatenate([x, x[::-1], [x[0]]]),
+                    np.concatenate([y, -y[::-1], [y[0]]]),
+                    color=col_edge, linewidth=lw, alpha=alpha_line)
+
+        def fill_side(ax, x, z, color):
+            ax.fill(x, z, color=color, alpha=alpha_fill, linewidth=0)
+            ax.plot(np.concatenate([x, [x[0]]]),
+                    np.concatenate([z, [z[0]]]),
+                    color=col_edge, linewidth=lw, alpha=alpha_line)
+
+        def fill_front(ax, y, z, color):
+            ax.fill(np.concatenate([y, -y[::-1]]),
+                    np.concatenate([z,  z[::-1]]),
+                    color=color, alpha=alpha_fill, linewidth=0)
+            ax.plot(np.concatenate([y, -y[::-1], [y[0]]]),
+                    np.concatenate([z,  z[::-1],  [z[0]]]),
+                    color=col_edge, linewidth=lw, alpha=alpha_line)
+
+        def draw_airfoil(ax, ntype, nid, color):
+            if not ntype or not nid: return
+            axf, ayu, ayl = generate_naca(ntype, nid)
+            if axf is None: return
+            ax.fill(np.concatenate([axf, axf[::-1]]),
+                    np.concatenate([ayu, ayl[::-1]]),
+                    color=color, alpha=alpha_fill)
+            ax.plot(axf, ayu, color=col_edge, lw=lw, alpha=alpha_line)
+            ax.plot(axf, ayl, color=col_edge, lw=lw, alpha=alpha_line)
+            ax.set_aspect('equal', adjustable='datalim')
+
+        # Fuselage
+        if 'BX' in geo and geo['BX']:
+            BX = np.array(geo['BX']); BR = np.array(geo['BR'])
+            ax_top.fill(np.concatenate([BX, BX[::-1]]),
+                        np.concatenate([BR, -BR[::-1]]),
+                        color=col_body, alpha=alpha_fill, linewidth=0)
+            ax_top.plot(BX,  BR, color=col_edge, lw=lw, alpha=alpha_line)
+            ax_top.plot(BX, -BR, color=col_edge, lw=lw, alpha=alpha_line)
+
+            BZU = np.array(geo['BZU']) if geo.get('BZU') else BR
+            BZL = np.array(geo['BZL']) if geo.get('BZL') else -BR
+            ax_side.fill(np.concatenate([BX, BX[::-1]]),
+                         np.concatenate([BZU, BZL[::-1]]),
+                         color=col_body, alpha=alpha_fill, linewidth=0)
+            ax_side.plot(BX, BZU, color=col_edge, lw=lw, alpha=alpha_line)
+            ax_side.plot(BX, BZL, color=col_edge, lw=lw, alpha=alpha_line)
+
+            rmax = float(np.max(BR))
+            zc   = float(np.mean(BZU)) if geo.get('BZU') else 0
+            theta = np.linspace(0, 2*math.pi, 60)
+            ax_front.fill(rmax*np.cos(theta), zc+rmax*np.sin(theta),
+                          color=col_body, alpha=alpha_fill, linewidth=0)
+            ax_front.plot(rmax*np.cos(theta), zc+rmax*np.sin(theta),
+                          color=col_edge, lw=lw, alpha=alpha_line)
+
+        # Wing
+        if all(k in geo for k in ['WCHRDR','WSSPN','WCHRDTP','XW','ZW']):
+            wp = _wing_planform(geo, 'W', geo['XW'], geo['ZW'])
+            fill_top(ax_top, wp['x'], wp['y'], col_wing)
+            fill_front(ax_front, wp['y'], wp['zf'], col_wing)
+            draw_airfoil(ax_wafl, geo.get('WNACA_TYPE'), geo.get('WNACA_ID'), col_wing)
+
+        # H-Tail
+        if all(k in geo for k in ['HCHRDR','HSSPN','HCHRDTP','XH','ZH']):
+            hp = _wing_planform(geo, 'H', geo['XH'], geo['ZH'])
+            fill_top(ax_top, hp['x'], hp['y'], col_htp)
+            fill_front(ax_front, hp['y'], hp['zf'], col_htp)
+            draw_airfoil(ax_hafl, geo.get('HNACA_TYPE'), geo.get('HNACA_ID'), col_htp)
+
+        # V-Tail
+        if all(k in geo for k in ['VCHRDR','VSSPN','VCHRDTP','XV','ZV']):
+            vp = _vtail_planform(geo, geo['XV'], geo['ZV'])
+            ax_top.fill(np.concatenate([vp['x'], vp['x'][::-1]]),
+                        np.concatenate([vp['y_side'], -vp['y_side'][::-1]]),
+                        color=col_vtp, alpha=alpha_fill, linewidth=0)
+            ax_top.plot(vp['x'],  vp['y_side'], color=col_edge, lw=lw, alpha=alpha_line)
+            ax_top.plot(vp['x'], -vp['y_side'], color=col_edge, lw=lw, alpha=alpha_line)
+            fill_side(ax_side, vp['x'], vp['z'], col_vtp)
+            ax_front.fill(
+                np.concatenate([vp['y_side'], -vp['y_side'][::-1]]),
+                np.concatenate([vp['z'],       vp['z'][::-1]]),
+                color=col_vtp, alpha=alpha_fill, linewidth=0)
+            ax_front.plot(
+                np.concatenate([vp['y_side'], -vp['y_side'][::-1], [vp['y_side'][0]]]),
+                np.concatenate([vp['z'],       vp['z'][::-1],      [vp['z'][0]]]),
+                color=col_edge, lw=lw, alpha=alpha_line)
+            draw_airfoil(ax_vafl, geo.get('VNACA_TYPE'), geo.get('VNACA_ID'), col_vtp)
+
+        for ax in [ax_top, ax_side, ax_front, ax_wafl, ax_hafl, ax_vafl]:
+            ax.set_aspect('equal', adjustable='datalim')
+        ax_top.invert_xaxis()
+
+    # Draw Before first (behind), then After (on top)
+    _draw_overlay(geo_b,
+                  B_BODY, B_WING, B_HTP, B_VTP, B_EDGE,
+                  B_ALPHA_FILL, B_ALPHA_LINE, lw=1.1)
+    _draw_overlay(geo_a,
+                  A_BODY, A_WING, A_HTP, A_VTP, A_EDGE,
+                  A_ALPHA_FILL, A_ALPHA_LINE, lw=1.4)
+
+    # Legend
+    import matplotlib.patches as mpatches
+    handles = [
+        mpatches.Patch(color=B_WING, alpha=0.7, label=f'{label_before}'),
+        mpatches.Patch(color=A_WING, alpha=0.7, label=f'{label_after}'),
+    ]
+    ax_top.legend(handles=handles, fontsize=7, facecolor='#21262d',
+                  edgecolor='#30363d', labelcolor=COL_EDGE, loc='lower right')
+
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    return fig
 
 
 # ── Standalone test ───────────────────────────────────────────────────

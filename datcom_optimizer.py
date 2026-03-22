@@ -451,10 +451,12 @@ def read_datcom_out(out_path, apply_sref_manipulation=False, dim_system='FT'):
         CL = raw_cl * scale_ref
         CD = raw_cd * scale_ref
         CM = raw_cm * scale_cm
-        rCL = (level_flight_cl if level_flight_cl is not None else 0.0) * scale_ref
     else:
         CL, CD, CM = raw_cl, raw_cd, raw_cm
-        rCL = level_flight_cl if level_flight_cl is not None else None
+
+    # rCL is recomputed later from theoretical wing area using
+    # current flight condition and weight with unit-consistent SI values.
+    rCL = None
 
     pressure_si    = _pressure_to_si(pressure, dim_system)
     temperature_si = _temperature_to_si(temperature, dim_system)
@@ -1216,7 +1218,7 @@ class DatcomApp(tk.Tk):
         messagebox.showinfo("Loaded",
             f"File parsed successfully.\n32 parameters read.\n"
             f"DIM = {self.dim_system}\n"
-            f"ZV = {zv:.5f} {'m' if self.dim_system == 'M' else 'ft'}    WT = {wt:.1f} {'N' if self.dim_system == 'M' else 'lbf'}\n\n"
+            f"WT = {wt:.1f} {'N' if self.dim_system == 'M' else 'lbf'}\n\n"
             f"Original file will NOT be modified during optimization.\n"
             f"A temporary working copy is used for each DATCOM evaluation.")
 
@@ -1360,8 +1362,6 @@ class DatcomApp(tk.Tk):
         both(f"  DATCOM EXE   : {exe_path if exe_path else os.path.join(exe_dir, 'digital_DATCOM.exe')}")
         both(f"  Temp copy    : {tmp_dat}  (original read-only)")
         both(f"  Output dir   : {out_folder}")
-        both(f"  ZV           : {zv:.5f} m")
-        both("  ZH           : fixed (not optimized)")
         both(f"  WT           : {wt:.1f} N")
         both(f"  ALSCHD       : {inp[0]*10:.2f} deg  (fixed, not optimized)")
         both(f"  Cost expr    : {cost_expr}")
@@ -1402,9 +1402,9 @@ class DatcomApp(tk.Tk):
         x0 = [inp[i] for i in active_idx]
 
         # Evaluate initial point
-        sc_b, cl_b, cd_b, cm_b, rcl_b = self._evaluate(
+        sc_b, cl_b, cd_b, cm_b, rcl_b, s_theoretical_b = self._evaluate(
             list(inp), zv, wt, dat_path, tmp_dat, exe_dir, cost_expr, fixed_zv)
-        both(f"\n  Initial eval:  score={sc_b:.5f}  CL={cl_b:.4f}  CD={cd_b:.4f}  CM={cm_b:.4f}  rCL={rcl_b:.4f}", "info")
+        both(f"\n  Initial eval:  score={sc_b:.5f}  CL={cl_b:.4f}  CD={cd_b:.4f}  CM={cm_b:.4f}  rCL={rcl_b:.4f}  S_theoretical={s_theoretical_b:.4f}", "info")
         both("-"*70)
 
         best_x     = list(x0)
@@ -1436,7 +1436,7 @@ class DatcomApp(tk.Tk):
                 self._iter_count += 1
                 full = list(inp)
                 for k2, i2 in enumerate(active_idx): full[i2] = x[k2]
-                score, CL, CD, CM, rCL = self._evaluate(
+                score, CL, CD, CM, rCL, s_theoretical = self._evaluate(
                     full, zv, wt, dat_path, tmp_dat, exe_dir, cost_expr, fixed_zv)
                 it = self._iter_count
                 self.after(0, lambda n=it: (
@@ -1446,7 +1446,7 @@ class DatcomApp(tk.Tk):
                     pass_best[0] = score
                     both(f"  Pass {pi+1} | Iter {pass_call[0]:4d} | "
                          f"score={score:12.5f} | "
-                         f"CL={CL:.4f}  CD={CD:.4f}  CM={CM:.5f}  rCL={rCL:.4f}",
+                         f"CL={CL:.4f}  CD={CD:.4f}  CM={CM:.5f}  rCL={rCL:.4f}  S_theoretical={s_theoretical:.4f}",
                          "score")
                 if score < best_score:
                     best_x     = list(x)
@@ -1477,7 +1477,7 @@ class DatcomApp(tk.Tk):
         self._final_inp = final_inp   # save for Aircraft View tab
 
         # Evaluate final point
-        sc_a, cl_a, cd_a, cm_a, rcl_a = self._evaluate(
+        sc_a, cl_a, cd_a, cm_a, rcl_a, s_theoretical_a = self._evaluate(
             final_inp, zv, wt, dat_path, tmp_dat, exe_dir, cost_expr, fixed_zv)
 
         both("\n"+"="*70, "head")
@@ -1604,14 +1604,14 @@ class DatcomApp(tk.Tk):
         reference_area = result.get("reference_area", native_sref)
         velocity = result["velocity"]
         density = result["density"]
-        rCL = result.get("rCL")
-        if rCL is None:
-            # Fallback only if DATCOM did not print the level-flight CL.
-            area_for_rcl = theoretical_wing_area if result.get("sref_manipulation_applied", False) else reference_area
-            wing_area_si = _area_to_si(area_for_rcl, self.dim_system)
-            velocity_si = _velocity_to_si(velocity, self.dim_system)
-            wt_si = _weight_to_si(wt, self.dim_system)
-            rCL = 2*wt_si/(wing_area_si*density*velocity_si**2) if (wing_area_si*density*velocity_si) else 1e6
+        # rCL is always recomputed from the current theoretical wing area.
+        # Units are normalized to SI so both DIM M and DIM FT cases stay correct:
+        #   rCL = 2*W / (rho * V^2 * S_theoretical)
+        wing_area_si = _area_to_si(theoretical_wing_area, self.dim_system)
+        velocity_si = _velocity_to_si(velocity, self.dim_system)
+        wt_si = _weight_to_si(wt, self.dim_system)
+        den = wing_area_si * density * (velocity_si ** 2)
+        rCL = 2*wt_si/den if den > 1e-12 else 1e6
         used_sref = REF_SREF_FORCED if result.get("sref_manipulation_applied", False) else reference_area
         self._last_eval_meta = {
             "forced_sref": REF_SREF_FORCED,
@@ -1642,32 +1642,61 @@ class DatcomApp(tk.Tk):
             score = 1e6
         else:
             score = base
-        return score, CL, CD, CM, rCL
+        return score, CL, CD, CM, rCL, theoretical_wing_area
 
 
 
     # ── Tab 6: Aircraft View ──────────────────────────────────────────
     def _tab_view(self, p):
-        self._view_frame = p
-        self._canvas_widget = None
+        self._view_frame    = p
+        self._canvas_widget = None   # side-by-side canvas
+        self._ov_canvas     = None   # overlay canvas
         self._last_fig      = None
+        self._ov_fig        = None
 
-        ctrl = tk.Frame(p, bg=BG_CARD); ctrl.pack(fill="x", padx=20, pady=10)
-        self._btn(ctrl, "Draw  Before  &  After  (side-by-side)",
+        # ── Control bar ──────────────────────────────────────────────
+        ctrl = tk.Frame(p, bg=BG_CARD); ctrl.pack(fill="x", padx=20, pady=8)
+        self._btn(ctrl, "Draw  Before  &  After",
                   self._draw_both, ACCENT, big=True).pack(side="left")
         self._btn(ctrl, "Save PNG...",
-                  self._save_view_png, BG_PANEL).pack(side="left", padx=10)
-
+                  self._save_view_png, BG_PANEL).pack(side="left", padx=8)
         self._view_status = tk.Label(
             ctrl,
             text="Load a dat file (and optionally run optimization), then click Draw.",
             bg=BG_CARD, fg=TEXT_SEC, font=self.FSMALL)
         self._view_status.pack(side="left", padx=12)
 
-        self._view_area = tk.Frame(p, bg=BG_DARK)
-        self._view_area.pack(fill="both", expand=True, padx=8, pady=(0,8))
+        # ── Inner notebook: 2 sub-tabs ────────────────────────────────
+        s = ttk.Style()
+        s.configure("ViewSub.TNotebook", background=BG_DARK, borderwidth=0)
+        s.configure("ViewSub.TNotebook.Tab",
+                    background=BG_INPUT, foreground=TEXT_SEC,
+                    padding=[10, 5], font=("Consolas", 8, "bold"))
+        s.map("ViewSub.TNotebook.Tab",
+              background=[("selected", BG_PANEL)],
+              foreground=[("selected", TEXT_PRI)])
+
+        vnb = ttk.Notebook(p, style="ViewSub.TNotebook")
+        vnb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        tab_sb = tk.Frame(vnb, bg=BG_DARK)   # sub-tab 1: side-by-side
+        tab_ov = tk.Frame(vnb, bg=BG_DARK)   # sub-tab 2: overlay
+        vnb.add(tab_sb, text="  Side-by-Side  ")
+        vnb.add(tab_ov, text="  Overlay  ")
+
+        # Side-by-side area
+        self._view_area = tk.Frame(tab_sb, bg=BG_DARK)
+        self._view_area.pack(fill="both", expand=True)
         tk.Label(self._view_area,
                  text="No drawing yet.\nClick 'Draw Before & After' above.",
+                 bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Consolas", 10)).pack(expand=True)
+
+        # Overlay area
+        self._ov_area = tk.Frame(tab_ov, bg=BG_DARK)
+        self._ov_area.pack(fill="both", expand=True)
+        tk.Label(self._ov_area,
+                 text="No overlay yet.\nClick 'Draw Before & After' above.",
                  bg=BG_DARK, fg=TEXT_DIM,
                  font=("Consolas", 10)).pack(expand=True)
 
@@ -1701,7 +1730,7 @@ class DatcomApp(tk.Tk):
 
         tmp_before = tmp_after = None
         try:
-            from aircraft_view import get_figure_sidebyside
+            from aircraft_view import get_figure_sidebyside, get_figure_overlay
 
             # Before: original inp_vals as loaded from file
             before_inp = list(self._initial_inp) if self._initial_inp else list(self.inp_vals)
@@ -1716,17 +1745,29 @@ class DatcomApp(tk.Tk):
                 after_label = "After (no optimization yet)"
             tmp_after = self._make_draw_dat(after_inp, dat_path)
 
-            fig = get_figure_sidebyside(
+            # ── Side-by-side ──────────────────────────────────────────
+            fig_sb = get_figure_sidebyside(
                 tmp_before, tmp_after,
                 label_left="Before (Original)",
                 label_right=after_label,
-                figsize=(18, 8))
+                figsize=(18, 8),
+                dim_system=self.dim_system)
+            self._last_fig = fig_sb
+            self._embed_figure(fig_sb)
 
-            self._last_fig = fig
-            self._embed_figure(fig)
+            # ── Overlay ───────────────────────────────────────────────
+            fig_ov = get_figure_overlay(
+                tmp_before, tmp_after,
+                label_before="Before (Original)",
+                label_after=after_label,
+                figsize=(13, 9),
+                dim_system=self.dim_system)
+            self._ov_fig = fig_ov
+            self._embed_overlay_figure(fig_ov)
+
             self._view_status.config(
                 text=f"Before vs After  |  "
-                     f"{'Optimized result shown on right.' if self._final_inp else 'Run optimization to see changes.'}")
+                     f"{'Optimized result shown.' if self._final_inp else 'Run optimization to see changes.'}")
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -1747,9 +1788,112 @@ class DatcomApp(tk.Tk):
         widget.configure(bg=BG_DARK)
         widget.pack(fill="both", expand=True)
         self._canvas_widget = canvas
+        self._bind_scroll_zoom(canvas, fig)
+
+    def _embed_overlay_figure(self, fig):
+        for w in self._ov_area.winfo_children(): w.destroy()
+        canvas = FigureCanvasTkAgg(fig, master=self._ov_area)
+        canvas.draw()
+        widget = canvas.get_tk_widget()
+        widget.configure(bg=BG_DARK)
+        widget.pack(fill="both", expand=True)
+        self._ov_canvas = canvas
+        self._bind_scroll_zoom(canvas, fig)
+
+    @staticmethod
+    def _bind_scroll_zoom(mpl_canvas, fig):
+        """
+        Bind:
+          • Mouse-wheel  → zoom only the axis under the cursor
+          • Middle-button drag (Button-2) → pan the axis under the cursor
+        """
+        state = {"pan_ax": None, "pan_x": None, "pan_y": None,
+                 "pan_xlim": None, "pan_ylim": None}
+
+        def _get_ax_under(event):
+            widget = mpl_canvas.get_tk_widget()
+            w_px = widget.winfo_width()
+            h_px = widget.winfo_height()
+            if w_px <= 0 or h_px <= 0:
+                return None
+            fig_x = event.x / w_px
+            fig_y = 1.0 - event.y / h_px
+            for ax in fig.get_axes():
+                pos = ax.get_position()
+                if (pos.x0 <= fig_x <= pos.x1 and
+                        pos.y0 <= fig_y <= pos.y1):
+                    return ax
+            return None
+
+        # ── Scroll zoom ───────────────────────────────────────────────
+        def _on_scroll(event):
+            ax = _get_ax_under(event)
+            if ax is None:
+                return
+            factor = 0.85 if event.delta > 0 else 1.0 / 0.85
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            xc = (xlim[0] + xlim[1]) / 2
+            yc = (ylim[0] + ylim[1]) / 2
+            ax.set_xlim(xc - (xlim[1]-xlim[0])*factor/2,
+                        xc + (xlim[1]-xlim[0])*factor/2)
+            ax.set_ylim(yc - (ylim[1]-ylim[0])*factor/2,
+                        yc + (ylim[1]-ylim[0])*factor/2)
+            mpl_canvas.draw_idle()
+
+        # ── Pan: press middle button ──────────────────────────────────
+        def _on_press(event):
+            ax = _get_ax_under(event)
+            if ax is None:
+                return
+            state["pan_ax"]   = ax
+            state["pan_x"]    = event.x
+            state["pan_y"]    = event.y
+            state["pan_xlim"] = ax.get_xlim()
+            state["pan_ylim"] = ax.get_ylim()
+
+        # ── Pan: drag with left button held ──────────────────────────
+        def _on_drag(event):
+            ax = state["pan_ax"]
+            if ax is None:
+                return
+            widget = mpl_canvas.get_tk_widget()
+            w_px = widget.winfo_width()
+            h_px = widget.winfo_height()
+            if w_px <= 0 or h_px <= 0:
+                return
+
+            # ax occupies a fraction of the figure — use that fraction
+            # to convert pixel delta → data delta accurately
+            pos = ax.get_position()
+            ax_w_px = pos.width  * w_px   # ax width in pixels
+            ax_h_px = pos.height * h_px   # ax height in pixels
+            if ax_w_px <= 0 or ax_h_px <= 0:
+                return
+
+            xl = state["pan_xlim"]
+            yl = state["pan_ylim"]
+            dx_data = (xl[1] - xl[0]) / ax_w_px * (event.x - state["pan_x"])
+            # screen y grows downward, data y grows upward → sign flip
+            dy_data = (yl[1] - yl[0]) / ax_h_px * (event.y - state["pan_y"])
+            ax.set_xlim(xl[0] - dx_data, xl[1] - dx_data)
+            ax.set_ylim(yl[0] + dy_data, yl[1] + dy_data)
+            mpl_canvas.draw_idle()
+
+        # ── Pan: release middle button ────────────────────────────────
+        def _on_release(event):
+            state["pan_ax"] = None
+
+        widget = mpl_canvas.get_tk_widget()
+        widget.bind("<MouseWheel>",  _on_scroll)
+        widget.bind("<ButtonPress-1>",   _on_press)
+        widget.bind("<B1-Motion>",       _on_drag)
+        widget.bind("<ButtonRelease-1>", _on_release)
 
     def _save_view_png(self):
-        if self._last_fig is None:
+        # Save whichever figure exists (prefer side-by-side)
+        fig = self._last_fig or self._ov_fig
+        if fig is None:
             messagebox.showinfo("Nothing to save", "Draw the aircraft first.")
             return
         path = filedialog.asksaveasfilename(
@@ -1757,8 +1901,8 @@ class DatcomApp(tk.Tk):
             defaultextension=".png",
             filetypes=[("PNG image","*.png"),("All files","*.*")])
         if path:
-            self._last_fig.savefig(path, dpi=150, bbox_inches='tight',
-                                    facecolor=self._last_fig.get_facecolor())
+            fig.savefig(path, dpi=150, bbox_inches='tight',
+                        facecolor=fig.get_facecolor())
             messagebox.showinfo("Saved", f"Saved to:\n{path}")
 
 
@@ -2089,6 +2233,7 @@ class DatcomApp(tk.Tk):
         widget.configure(bg=BG_DARK)
         widget.pack(fill="both", expand=True)
         self._sweep_canvas_obj = canvas
+        self._bind_scroll_zoom(canvas, fig)
 
     def _save_sweep_png(self):
         if self._sweep_fig is None:
