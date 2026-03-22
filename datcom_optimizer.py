@@ -40,6 +40,9 @@ BORDER   = "#30363d"
 RED      = "#f85149"
 YELLOW   = "#d29922"
 
+REF_SREF_FORCED = 10.0
+CM_SREF_SCALE = 1000.0
+
 # ── Parameter definitions (idx 0 = ALSCHD excluded from opt) ────────
 PARAM_DEFS = [
     ( 1,"Wing - SAVSI  (inner sweep)","deg", 1000,"Wing"),
@@ -86,167 +89,404 @@ DEFAULT_BOUNDS = {
 }
 
 
+SURFACE_CONFIG = {
+    "Wing": {
+        "label": "Wing",
+        "base": 1,
+        "required_single": [1, 3, 5, 7, 8, 10],
+        "required_two":    [2, 4, 6, 9],
+    },
+    "Vertical Tail": {
+        "label": "V-Tail",
+        "base": 11,
+        "required_single": [11, 13, 15, 17, 18, 20],
+        "required_two":    [12, 14, 16, 19],
+    },
+    "Horizontal Tail": {
+        "label": "H-Tail",
+        "base": 21,
+        "required_single": [21, 23, 25, 27, 28, 30],
+        "required_two":    [22, 24, 26, 29],
+    },
+}
+
+PARAM_INFO = {idx: {"label": label, "unit": unit, "scale": scale, "section": section}
+              for idx, label, unit, scale, section in PARAM_DEFS}
+
+SURFACE_PARAM_KEYWORDS = {
+    1: "SAVSI",  2: "SAVSO",  3: "SSPN",   4: "SSPNOP", 5: "DHDADI",
+    6: "DHDADO", 7: "TWISTA", 8: "CHRDR",  9: "CHRDBP", 10: "CHRDTP",
+    11: "SAVSI", 12: "SAVSO", 13: "SSPN", 14: "SSPNOP", 15: "DHDADI",
+    16: "DHDADO",17: "TWISTA",18: "CHRDR",19: "CHRDBP",20: "CHRDTP",
+    21: "SAVSI", 22: "SAVSO", 23: "SSPN", 24: "SSPNOP", 25: "DHDADI",
+    26: "DHDADO",27: "TWISTA",28: "CHRDR",29: "CHRDBP",30: "CHRDTP",
+}
+
+
+LENGTH_PARAM_INDICES = {3,4,8,9,10,13,14,18,19,20,23,24,28,29,30}
+
+def _detect_dim_system(text):
+    m = re.search(r'\bDIM\s+(M|FT)\b', text, re.IGNORECASE)
+    return m.group(1).upper() if m else 'FT'
+
+def _display_unit_for_param(idx, dim_system):
+    if idx in LENGTH_PARAM_INDICES:
+        return 'm' if dim_system == 'M' else 'ft'
+    return PARAM_INFO[idx]['unit']
+
+def _length_scale_for_dim(dim_system):
+    return 100.0
+
+def _area_to_si(area_value, dim_system):
+    return area_value if dim_system == 'M' else area_value * 0.09290304
+
+def _velocity_to_si(velocity_value, dim_system):
+    return velocity_value if dim_system == 'M' else velocity_value * 0.3048
+
+def _pressure_to_si(pressure_value, dim_system):
+    return pressure_value if dim_system == 'M' else pressure_value * 47.88025898
+
+def _temperature_to_si(temp_value, dim_system):
+    return temp_value if dim_system == 'M' else temp_value * (5.0 / 9.0)
+
+def _weight_to_si(weight_value, dim_system):
+    return weight_value if dim_system == 'M' else weight_value * 4.4482216152605
+
+def _extract_surface_blocks(text):
+    pattern = re.compile(r'\$(WGPLNF|VTPLNF|HTPLNF)\b(.*?)\$', re.IGNORECASE | re.DOTALL)
+    blocks = {'WGPLNF': [], 'VTPLNF': [], 'HTPLNF': []}
+    for name, body in pattern.findall(text):
+        assigns = {}
+        for key, val in re.findall(r'([A-Z][A-Z0-9()]*?)\s*=\s*([^,$]+)', body, re.IGNORECASE):
+            k = key.upper().strip()
+            try:
+                assigns[k] = float(val.strip())
+            except ValueError:
+                continue
+        blocks[name.upper()].append(assigns)
+    return blocks
+
+
 # ── Custom Checkbox widget ────────────────────────────────────────────
 class CheckBox(tk.Canvas):
     """Fully custom-drawn checkbox. Works on any dark/light theme."""
     SZ = 17
 
-    def __init__(self, parent, variable, bg=BG_CARD, **kw):
+    def __init__(self, parent, variable, bg=BG_CARD, enabled=True, **kw):
         super().__init__(parent, width=self.SZ, height=self.SZ,
-                         bg=bg, highlightthickness=0, cursor="hand2", **kw)
+                         bg=bg, highlightthickness=0,
+                         cursor="hand2" if enabled else "arrow", **kw)
         self._var = variable
+        self._enabled = enabled
         self._draw()
         self._var.trace_add("write", lambda *_: self._draw())
-        self.bind("<Button-1>", lambda _: self._var.set(not self._var.get()))
+        self.bind("<Button-1>", self._on_click)
+
+    def _on_click(self, _event=None):
+        if self._enabled:
+            self._var.set(not self._var.get())
+
+    def set_enabled(self, enabled):
+        self._enabled = bool(enabled)
+        self.configure(cursor="hand2" if self._enabled else "arrow")
+        self._draw()
 
     def _draw(self):
         self.delete("all")
         n = self.SZ
-        # Box
-        self.create_rectangle(1, 1, n-2, n-2,
-                               outline="#5a7a9a", fill="#1e2d3d", width=1)
+        outline = "#5a7a9a" if self._enabled else BORDER
+        fill = "#1e2d3d" if self._enabled else BG_INPUT
+        tick = "#38d8f0" if self._enabled else TEXT_DIM
+        self.create_rectangle(1, 1, n-2, n-2, outline=outline, fill=fill, width=1)
         if self._var.get():
-            # Bold cyan tick
             p = 3
-            self.create_line(p, n//2, n//2-1, n-p-1,
-                              fill="#38d8f0", width=2, capstyle="round")
-            self.create_line(n//2-1, n-p-1, n-p, p,
-                              fill="#38d8f0", width=2, capstyle="round")
+            self.create_line(p, n//2, n//2-1, n-p-1, fill=tick, width=2, capstyle="round")
+            self.create_line(n//2-1, n-p-1, n-p, p, fill=tick, width=2, capstyle="round")
 
 
 # ── DATCOM file parser ────────────────────────────────────────────────
 def parse_for005(filepath):
     try:
         with open(filepath, 'r') as f:
-            lines = f.readlines()
-        words = [l.split() for l in lines]
+            text = f.read()
+
+        dim_system = _detect_dim_system(text)
+        blocks = _extract_surface_blocks(text)
 
         def find_scalar(kw):
-            for row in words:
-                for w in row:
-                    if w[:len(kw)] == kw and '=' in w:
-                        s = w[w.index('=')+1:].rstrip(',$')
-                        try: return float(s)
-                        except: pass
-            return None
+            m = re.search(rf'\b{re.escape(kw)}\s*=\s*([^,\n\r$]+)', text, re.IGNORECASE)
 
-        lists = {k:[] for k in ['savsi','savso','sspn','sspnop','dhdadi',
-                                  'dhdado','twista','chrdr','chrdbp','chrdtp']}
-        kw_map = {'SAVSI':'savsi','SAVSO':'savso','SSPN=':'sspn','SSPNOP':'sspnop',
-                  'DHDADI':'dhdadi','DHDADO':'dhdado','TWISTA':'twista',
-                  'CHRDR':'chrdr','CHRDBP':'chrdbp','CHRDTP':'chrdtp'}
-        for row in words:
-            for w in row:
-                for kw, var in kw_map.items():
-                    if w[:len(kw)] == kw and '=' in w:
-                        s = w[w.index('=')+1:].rstrip(',$')
-                        try: lists[var].append(float(s))
-                        except: pass
 
-        def gl(lst, i, d=0.0): return (lst[i]/1000.0) if i < len(lst) else d
-        def gm(lst, i, d=0.0): return (lst[i]/100.0)  if i < len(lst) else d
+            if not m:
+                return None
+            try:
+                return float(m.group(1).strip())
+            except Exception:
+                return None
 
-        alschd = find_scalar('ALSCHD(1)') or find_scalar('ALSCHD') or 5.0
-        zv     = find_scalar('ZV') or 0.017
-        wt     = find_scalar('WT') or 26500.0
-        zh_raw = find_scalar('ZH') or 0.366
-        s = lists
+        alschd = find_scalar('ALSCHD(1)')
+        if alschd is None:
+            alschd = find_scalar('ALSCHD')
+        if alschd is None:
+            alschd = 5.0
+        zv = find_scalar('ZV')
+        if zv is None:
+            zv = 0.017 if dim_system == 'M' else 0.0558
+        wt = find_scalar('WT')
+        if wt is None:
+            wt = 26500.0
+        zh_raw = find_scalar('ZH')
+        if zh_raw is None:
+            zh_raw = 0.366 if dim_system == 'M' else 1.2008
 
-        inp = [None]*32
-        inp[0]  = alschd/10.0
-        inp[1]  = gl(s['savsi'], 0, 0.040);    inp[2]  = gl(s['savso'], 0, 0.040)
-        inp[3]  = gm(s['sspn'],  0, 0.04572);  inp[4]  = gm(s['sspnop'],0, 0.032258)
-        inp[5]  = gm(s['dhdadi'],0, 0.0);      inp[6]  = gm(s['dhdado'],0, 0.0)
-        inp[7]  = gm(s['twista'],0,-0.0328);   inp[8]  = gm(s['chrdr'], 0, 0.04965)
-        inp[9]  = gm(s['chrdbp'],0, 0.0129);   inp[10] = gm(s['chrdtp'],0, 0.0129)
-        inp[11] = gl(s['savsi'], 1, 0.0475);   inp[12] = gl(s['savso'], 1, 0.0475)
-        inp[13] = gm(s['sspn'],  1, 0.031968); inp[14] = gm(s['sspnop'],1, 0.02568)
-        inp[15] = gm(s['dhdadi'],1, 0.0);      inp[16] = gm(s['dhdado'],1, 0.0)
-        inp[17] = gm(s['twista'],1, 0.0);      inp[18] = gm(s['chrdr'], 1, 0.03088)
-        inp[19] = gm(s['chrdbp'],1, 0.01200);  inp[20] = gm(s['chrdtp'],1, 0.01206)
-        inp[21] = gl(s['savsi'], 2, 0.040);    inp[22] = gl(s['savso'], 2, 0.040)
-        inp[23] = gm(s['sspn'],  2, 0.02808);  inp[24] = gm(s['sspnop'],2, 0.017686)
-        inp[25] = gm(s['dhdadi'],2,-0.01);     inp[26] = gm(s['dhdado'],2,-0.01)
-        inp[27] = gm(s['twista'],2, 0.0);      inp[28] = gm(s['chrdr'], 2, 0.03328)
-        inp[29] = gm(s['chrdbp'],2, 0.009497); inp[30] = gm(s['chrdtp'],2, 0.009497)
-        inp[31] = zh_raw/100.0
+        surface_types = {}
+        missing_errors = []
+        block_map = {
+            'Wing': blocks['WGPLNF'][0] if blocks['WGPLNF'] else {},
+            'Vertical Tail': blocks['VTPLNF'][0] if blocks['VTPLNF'] else {},
+            'Horizontal Tail': blocks['HTPLNF'][0] if blocks['HTPLNF'] else {},
+        }
 
-        return inp, zv, wt, True, ""
+        essential_single = {'SAVSI', 'SSPN', 'TWISTA', 'CHRDR', 'CHRDTP'}
+        essential_two = {'SAVSO', 'SSPNOP', 'CHRDBP'}
+
+        for section_name, cfg in SURFACE_CONFIG.items():
+            surf = block_map.get(section_name, {})
+            if not surf:
+                missing_errors.append(f"{cfg['label']}: missing ${'WGPLNF' if section_name=='Wing' else 'VTPLNF' if section_name=='Vertical Tail' else 'HTPLNF'}$ block")
+                surface_types[section_name] = 'single'
+                continue
+
+            has_two = (
+                ('SAVSO' in surf and abs(surf.get('SAVSO', 0.0)) > 1e-9) or
+                ('CHRDBP' in surf and abs(surf.get('CHRDBP', 0.0)) > 1e-9) or
+                ('DHDADO' in surf and abs(surf.get('DHDADO', 0.0)) > 1e-9) or
+                ('SSPNOP' in surf and abs(surf.get('SSPNOP', 0.0)) > 1e-9)
+            )
+            surface_types[section_name] = 'two' if has_two else 'single'
+
+            for kw in essential_single:
+                if kw not in surf:
+                    missing_errors.append(f"{cfg['label']}: missing required input {kw}")
+
+            if has_two:
+                for kw in essential_two:
+                    if kw not in surf:
+                        missing_errors.append(f"{cfg['label']}: detected two-panel geometry but missing required input {kw}")
+
+        if missing_errors:
+            return [], 0.017, 26500.0, False, "\n".join(missing_errors), {}, dim_system
+
+        length_scale = _length_scale_for_dim(dim_system)
+        angle_scale = 1000.0
+
+        def gp(surface_dict, key, default=0.0, scale=length_scale):
+            return surface_dict.get(key, default) / scale
+
+        wing = block_map['Wing']
+        vtail = block_map['Vertical Tail']
+        htail = block_map['Horizontal Tail']
+
+        inp = [None] * 32
+        inp[0]  = alschd / 10.0
+        inp[1]  = gp(wing, 'SAVSI', 40.0, angle_scale); inp[2]  = gp(wing, 'SAVSO', 40.0, angle_scale)
+        inp[3]  = gp(wing, 'SSPN', 4.572);              inp[4]  = gp(wing, 'SSPNOP', 3.2258)
+        inp[5]  = gp(wing, 'DHDADI', 0.0, 100.0);      inp[6]  = gp(wing, 'DHDADO', 0.0, 100.0)
+        inp[7]  = gp(wing, 'TWISTA', -3.28, 100.0);    inp[8]  = gp(wing, 'CHRDR', 4.965)
+        inp[9]  = gp(wing, 'CHRDBP', 1.29);            inp[10] = gp(wing, 'CHRDTP', 1.29)
+        inp[11] = gp(vtail, 'SAVSI', 47.5, angle_scale); inp[12] = gp(vtail, 'SAVSO', 47.5, angle_scale)
+        inp[13] = gp(vtail, 'SSPN', 3.1968);           inp[14] = gp(vtail, 'SSPNOP', 2.568)
+        inp[15] = gp(vtail, 'DHDADI', 0.0, 100.0);     inp[16] = gp(vtail, 'DHDADO', 0.0, 100.0)
+        inp[17] = gp(vtail, 'TWISTA', 0.0, 100.0);     inp[18] = gp(vtail, 'CHRDR', 3.088)
+        inp[19] = gp(vtail, 'CHRDBP', 1.2);            inp[20] = gp(vtail, 'CHRDTP', 1.206)
+        inp[21] = gp(htail, 'SAVSI', 40.0, angle_scale); inp[22] = gp(htail, 'SAVSO', 40.0, angle_scale)
+        inp[23] = gp(htail, 'SSPN', 2.808);            inp[24] = gp(htail, 'SSPNOP', 1.7686)
+        inp[25] = gp(htail, 'DHDADI', -1.0, 100.0);    inp[26] = gp(htail, 'DHDADO', -1.0, 100.0)
+        inp[27] = gp(htail, 'TWISTA', 0.0, 100.0);     inp[28] = gp(htail, 'CHRDR', 3.328)
+        inp[29] = gp(htail, 'CHRDBP', 0.9497);         inp[30] = gp(htail, 'CHRDTP', 0.9497)
+        inp[31] = zh_raw / length_scale
+
+        return inp, zv, wt, True, '', surface_types, dim_system
     except Exception as e:
         import traceback
-        return [], 0.017, 26500.0, False, traceback.format_exc()
+        return [], 0.017, 26500.0, False, traceback.format_exc(), {}, 'FT'
 
 
 # ── Write inp vector to a dat file ───────────────────────────────────
-def write_inp_to_dat(inp, dat_path, fixed_zv, zv_orig):
+def write_inp_to_dat(inp, dat_path, fixed_zv, zv_orig, force_sref_manipulation=False):
     with open(dat_path, 'r') as f:
-        lines = f.readlines()
-    words = [l.split() for l in lines]
+        text = f.read()
 
-    kw_map = {
+    dim_system = _detect_dim_system(text)
+    length_scale = _length_scale_for_dim(dim_system)
+
+    def fmt(v):
+        return f"{v:.5f}"
+
+    replacements = {
         'SAVSI': [inp[1]*1000, inp[11]*1000, inp[21]*1000],
         'SAVSO': [inp[2]*1000, inp[12]*1000, inp[22]*1000],
-        'SSPN=': [inp[3]*100,  inp[13]*100,  inp[23]*100],
-        'SSPNOP':[inp[4]*100,  inp[14]*100,  inp[24]*100],
+        'SSPN': [inp[3]*length_scale,  inp[13]*length_scale,  inp[23]*length_scale],
+        'SSPNOP':[inp[4]*length_scale,  inp[14]*length_scale,  inp[24]*length_scale],
         'DHDADI':[inp[5]*100,  inp[15]*100,  inp[25]*100],
         'DHDADO':[inp[6]*100,  inp[16]*100,  inp[26]*100],
         'TWISTA':[inp[7]*100,  inp[17]*100,  inp[27]*100],
-        'CHRDR': [inp[8]*100,  inp[18]*100,  inp[28]*100],
-        'CHRDBP':[inp[9]*100,  inp[19]*100,  inp[29]*100],
-        'CHRDTP':[inp[10]*100, inp[20]*100,  inp[30]*100],
+        'CHRDR': [inp[8]*length_scale,  inp[18]*length_scale,  inp[28]*length_scale],
+        'CHRDBP':[inp[9]*length_scale,  inp[19]*length_scale,  inp[29]*length_scale],
+        'CHRDTP':[inp[10]*length_scale, inp[20]*length_scale,  inp[30]*length_scale],
     }
-    counters = {k:0 for k in kw_map}
 
-    for r, row in enumerate(words):
-        for c, w in enumerate(row):
-            for kw, vals in kw_map.items():
-                if w[:len(kw)] == kw and '=' in w:
-                    n = counters[kw]
-                    if n < len(vals):
-                        idx2 = w.index('=')+1
-                        words[r][c] = w[:idx2] + f"{vals[n]:.5f},"
-                        lines[r] = " " + ' '.join(words[r]) + '\n'
-                        counters[kw] = n+1
-            if not fixed_zv:
-                if w[:2] == 'ZH' and '=' in w:
-                    idx2 = w.index('=')+1
-                    words[r][c] = w[:idx2] + f"{inp[31]*100:.5f},$"
-                    lines[r] = " " + ' '.join(words[r]) + '\n'
+    block_surface_index = {'WGPLNF': 0, 'VTPLNF': 1, 'HTPLNF': 2}
+
+    def _replace_block(match):
+        block_name = match.group(1).upper()
+        body = match.group(2)
+        surf_idx = block_surface_index.get(block_name)
+        if surf_idx is None:
+            return match.group(0)
+        for key, vals in replacements.items():
+            val = vals[surf_idx]
+            body = re.sub(rf'(\b{key}\s*=\s*)([^,$]+)', rf'\g<1>{fmt(val)}', body, flags=re.IGNORECASE)
+        return f'${block_name}{body}$'
+
+    text = re.sub(r'\$(WGPLNF|VTPLNF|HTPLNF)\b(.*?)\$', _replace_block, text, flags=re.IGNORECASE | re.DOTALL)
+
+    if force_sref_manipulation:
+        text = re.sub(r'(\bSREF\s*=\s*)([^,\n\r$]+)', rf'\g<1>{fmt(REF_SREF_FORCED)}', text, flags=re.IGNORECASE)
+
+    if not fixed_zv:
+        zh_val = inp[31] * length_scale
+        text = re.sub(r'(\bZH\s*=\s*)([^,\n\r$]+)', rf'\g<1>{fmt(zh_val)}', text, flags=re.IGNORECASE)
+
+
 
     with open(dat_path, 'w') as f:
-        f.writelines(lines)
+        f.write(text)
 
 
 # ── Read datcom.out ───────────────────────────────────────────────────
-def read_datcom_out(out_path):
+def _token_reads_as_zero(token):
+    if token is None:
+        return False
+    tok = str(token).strip().upper().replace("D", "E")
+    return bool(re.fullmatch(r"[-+]?0(?:\.0+)?(?:E[-+]?\d+)?", tok))
+
+
+def read_datcom_out(out_path, apply_sref_manipulation=False, dim_system='FT'):
     with open(out_path, 'r') as f:
         lines = f.readlines()
     words = [l.split() for l in lines]
-    wing_area = CL = CD = CM = 1.0
-    velocity = pressure = temperature = 288.15
-    for i, row in enumerate(words):
-        for j, w in enumerate(row):
-            if w[:11] == "THEORITICAL":
-                try: wing_area = float(words[i+1][j])
-                except: pass
-            if w == "CL":
-                try: CL = float(words[i+2][j-1])*10/wing_area
-                except: pass
-            if w == "CD":
-                try: CD = float(words[i+2][j-1])*10/wing_area
-                except: pass
-            if w == "CM":
-                try: CM = float(words[i+2][j-1])*1000/wing_area
-                except: pass
-            if w[:8] == "VELOCITY":
-                try:
-                    velocity    = float(words[i+3][j+1])
-                    pressure    = float(words[i+3][j+2])
-                    temperature = float(words[i+3][j+3])
-                except: pass
-    density = pressure/(287.058*temperature)
-    return CL, CD, CM, wing_area, velocity, density
 
+    theoretical_wing_area = None
+    reference_area = None
+    raw_cl = raw_cd = raw_cm = 1.0
+    raw_cl_token = raw_cd_token = raw_cm_token = None
+    level_flight_cl = None
+    velocity = pressure = temperature = 288.15
+
+    for i, line in enumerate(lines):
+        row = words[i]
+        # Primary reference dimensions table
+        if reference_area is None and re.search(r'FLIGHT CONDITIONS', line, re.IGNORECASE):
+            for k in range(i + 1, min(i + 8, len(words))):
+                if words[k] and words[k][0] == '0' and len(words[k]) >= 7:
+                    try:
+                        velocity = float(words[k][3])
+                        pressure = float(words[k][4])
+                        temperature = float(words[k][5])
+                        reference_area = float(words[k][7])
+                        break
+                    except Exception:
+                        pass
+
+        if level_flight_cl is None:
+            m_lvl = re.search(r'LEVEL\s+FLIGHT\s+LIFT\s+COEFFICIENT\s*=\s*([\-+0-9.DEde]+)', line, re.IGNORECASE)
+            if m_lvl:
+                try:
+                    level_flight_cl = float(m_lvl.group(1).replace('D', 'E').replace('d', 'e'))
+                except Exception:
+                    pass
+
+        # Theoretical wing area: only take the WING block, not HT/VT
+        if theoretical_wing_area is None and re.search(r'^0\s+WING\s*$', line.strip(), re.IGNORECASE):
+            for k in range(i + 1, min(i + 6, len(lines))):
+                if re.search(r'TOTAL\s+THEORITICAL', lines[k], re.IGNORECASE):
+                    try:
+                        vals = re.findall(r'[\-+]?\d+(?:\.\d+)?(?:[ED][\-+]?\d+)?', lines[k + 1], re.IGNORECASE)
+                        if vals:
+                            theoretical_wing_area = float(vals[0].replace('D', 'E').replace('d', 'e'))
+                            break
+                    except Exception:
+                        pass
+
+        for j, w in enumerate(row):
+            if w == "CL":
+                try:
+                    raw_cl_token = words[i+2][j-1]
+                    raw_cl = float(raw_cl_token)
+                except Exception:
+                    pass
+            if w == "CD":
+                try:
+                    raw_cd_token = words[i+2][j-1]
+                    raw_cd = float(raw_cd_token)
+                except Exception:
+                    pass
+            if w == "CM":
+                try:
+                    raw_cm_token = words[i+2][j-1]
+                    raw_cm = float(raw_cm_token)
+                except Exception:
+                    pass
+
+    if reference_area is None:
+        reference_area = REF_SREF_FORCED if apply_sref_manipulation else 1.0
+    if theoretical_wing_area is None:
+        theoretical_wing_area = reference_area
+
+    if apply_sref_manipulation:
+        area_den = max(theoretical_wing_area, 1e-12)
+        scale_ref = REF_SREF_FORCED / area_den
+        scale_cm = CM_SREF_SCALE / area_den
+        CL = raw_cl * scale_ref
+        CD = raw_cd * scale_ref
+        CM = raw_cm * scale_cm
+        rCL = (level_flight_cl if level_flight_cl is not None else 0.0) * scale_ref
+    else:
+        CL, CD, CM = raw_cl, raw_cd, raw_cm
+        rCL = level_flight_cl if level_flight_cl is not None else None
+
+    pressure_si    = _pressure_to_si(pressure, dim_system)
+    temperature_si = _temperature_to_si(temperature, dim_system)
+    density = pressure_si / (287.058 * temperature_si)
+    zero_fields = []
+    if _token_reads_as_zero(raw_cl_token):
+        zero_fields.append("CL")
+    if _token_reads_as_zero(raw_cd_token):
+        zero_fields.append("CD")
+    if _token_reads_as_zero(raw_cm_token):
+        zero_fields.append("CM")
+
+    return {
+        "CL": CL,
+        "CD": CD,
+        "CM": CM,
+        "rCL": rCL,
+        "theoretical_wing_area": theoretical_wing_area,
+        "reference_area": reference_area,
+        "velocity": velocity,
+        "density": density,
+        "level_flight_cl": level_flight_cl,
+        "raw_CL": raw_cl,
+        "raw_CD": raw_cd,
+        "raw_CM": raw_cm,
+        "raw_CL_token": raw_cl_token,
+        "raw_CD_token": raw_cd_token,
+        "raw_CM_token": raw_cm_token,
+        "zero_detected": bool(zero_fields),
+        "zero_fields": zero_fields,
+        "sref_manipulation_applied": bool(apply_sref_manipulation),
+    }
 
 
 # ── Alpha-sweep DATCOM output parser ─────────────────────────────────
@@ -265,18 +505,64 @@ def parse_sweep_out(out_path, alpha_list):
     Returns (results, velocity, pressure, temperature) where
     results = [{'alpha':..,'CL':..,'CD':..,'CM':..}, ...]
     """
+    import re
+
     results = []
-    velocity = pressure = temperature = 288.15
+    velocity = pressure = temperature = None
 
     with open(out_path, 'r', errors='replace') as f:
         lines = f.readlines()
 
+    def _try_parse_vel_block(start_idx):
+        """
+        VELOCITY başlığından sonraki birkaç satır içinde
+        sayısal veri satırını bulmaya çalışır.
+        Beklenen veri satırı mantığı:
+            [0] MACH VELOCITY PRESSURE TEMPERATURE ...
+        veya
+            MACH VELOCITY PRESSURE TEMPERATURE ...
+        """
+        for j in range(start_idx + 1, min(start_idx + 8, len(lines))):
+            raw = lines[j].strip()
+            if not raw:
+                continue
+
+            tok = raw.split()
+            if not tok:
+                continue
+
+            # İlk token '0' section marker olabilir
+            s = 1 if tok[0] == '0' else 0
+
+            # En az MACH + VELOCITY + PRESSURE + TEMPERATURE olmalı
+            if len(tok) < s + 4:
+                continue
+
+            try:
+                mach = float(tok[s + 0])   # kullanılmasa da satır doğrulaması için
+                vel  = float(tok[s + 1])
+                pres = float(tok[s + 2])
+                temp = float(tok[s + 3])
+                return vel, pres, temp
+            except (ValueError, IndexError):
+                continue
+
+        return None, None, None
+
     in_table = False
+
     for i, line in enumerate(lines):
         sline = line.strip()
 
-        # ── Detect the correct header: must have ALPHA, CD, CL, CM
-        #    but NOT the other alpha-tables (EPSLON, QINF, CLQ, CMQ …)
+        # VELOCITY / PRESSURE / TEMPERATURE ilk uygun yerden alınsın
+        if velocity is None and re.search(r'\bVELOCITY\b', line, re.IGNORECASE):
+            vel, pres, temp = _try_parse_vel_block(i)
+            if vel is not None:
+                velocity, pressure, temperature = vel, pres, temp
+
+        # Doğru aero coeff tablosunu yakala:
+        # ALPHA, CD, CL, CM içermeli
+        # ama EPSLON/QINF/CLQ/CMQ gibi başka tablolar olmamalı
         if (re.search(r'\bALPHA\b', sline) and
                 re.search(r'\bCD\b', sline) and
                 re.search(r'\bCL\b', sline) and
@@ -286,21 +572,11 @@ def parse_sweep_out(out_path, alpha_list):
             continue
 
         if not in_table:
-            # Capture velocity / pressure / temperature (first occurrence)
-            if re.search(r'\bVELOCITY\b', line, re.IGNORECASE) and velocity == 288.15:
-                try:
-                    tok = lines[i+3].split()
-                    s = 1 if tok[0] == '0' else 0
-                    velocity    = float(tok[s+2])
-                    pressure    = float(tok[s+3])
-                    temperature = float(tok[s+4])
-                except (ValueError, IndexError):
-                    pass
             continue
 
-        # ── Inside the table ─────────────────────────────────────────
+        # Tablo içi
         if not sline or sline == '0':
-            continue   # blank / section marker
+            continue
 
         tokens = sline.split()
         try:
@@ -308,13 +584,31 @@ def parse_sweep_out(out_path, alpha_list):
             CD    = float(tokens[1])
             CL    = float(tokens[2])
             CM    = float(tokens[3])
-            results.append({'alpha': alpha, 'CL': CL, 'CD': CD, 'CM': CM})
+            results.append({
+                'alpha': alpha,
+                'CL': CL,
+                'CD': CD,
+                'CM': CM
+            })
         except (ValueError, IndexError):
-            in_table = False  # non-numeric row ends the table
+            # numerik olmayan satır geldiyse tablo bitmiş kabul et
+            in_table = False
 
-    density = pressure / (287.058 * temperature)
+    if velocity is None or pressure is None or temperature is None:
+        raise ValueError(
+            'VELOCITY / PRESSURE / TEMPERATURE could not be parsed from datcom.out during sweep.'
+        )
+
+    if alpha_list is not None:
+        expected = [float(a) for a in alpha_list]
+        parsed = [row['alpha'] for row in results]
+
+        if len(parsed) != len(expected):
+            raise ValueError(
+                f"Sweep parse mismatch: expected {len(expected)} alpha rows, parsed {len(parsed)}."
+            )
+
     return results, velocity, pressure, temperature
-
 
 def patch_dat_for_sweep(src_dat, dst_dat, nalpha, alschd_list):
     """
@@ -402,11 +696,14 @@ class DatcomApp(tk.Tk):
         self.inp_vals         = []
         self.zv_val           = 0.017
         self.wt_val           = 26500.0
+        self.dim_system       = 'FT'
         self._running         = False
         self._iter_count      = 0
         self._best_score      = float('inf')
         self._initial_inp     = []
         self._final_inp       = []   # set after optimization
+        self._sref_manipulation_enabled = False
+        self._sref_manipulation_decided = False
 
         # Aero Sweep tab state
         self._sweep_running   = False
@@ -417,6 +714,9 @@ class DatcomApp(tk.Tk):
         self.param_lo      = {idx: tk.StringVar() for idx,*_ in PARAM_DEFS}
         self.param_hi      = {idx: tk.StringVar() for idx,*_ in PARAM_DEFS}
         self.param_cur     = {idx: tk.StringVar(value="-") for idx,*_ in PARAM_DEFS}
+        self.param_available = {idx: True for idx,*_ in PARAM_DEFS}
+        self.surface_panel_type = {name: "two" for name in SURFACE_CONFIG}
+        self._param_widgets = {}
 
         self.FH1    = ("Consolas",12,"bold")
         self.FBODY  = ("Consolas",9)
@@ -521,7 +821,9 @@ class DatcomApp(tk.Tk):
 
     def _build_param_rows(self):
         f = self._pi
-        for w in f.winfo_children(): w.destroy()
+        self._param_widgets = {}
+        for w in f.winfo_children():
+            w.destroy()
 
         hdr = tk.Frame(f, bg=BG_PANEL); hdr.pack(fill="x", pady=(0,1))
         for txt, wid in [(" ",3),("Parameter",34),("Current Value",16),
@@ -539,22 +841,111 @@ class DatcomApp(tk.Tk):
                          bg=BG_DARK, fg=ACCENT, font=("Consolas",8,"bold")).pack(
                              side="left", padx=6, pady=2)
 
+                panel_var = self.surface_panel_type.get(section, "two")
+                panel_text = f"Detected geometry: {panel_var.title()} Panel"
+                tk.Label(sr, text=panel_text, bg=BG_DARK, fg=TEXT_DIM,
+                         font=self.FSMALL).pack(side="right", padx=8)
+
             bg = BG_CARD if idx%2==0 else BG_PANEL
             row = tk.Frame(f, bg=bg); row.pack(fill="x", pady=1)
 
-            CheckBox(row, self.param_enabled[idx], bg=bg).pack(
-                side="left", padx=(10, 4), pady=4)
+            cb = CheckBox(row, self.param_enabled[idx], bg=bg, enabled=self.param_available.get(idx, True))
+            cb.pack(side="left", padx=(10, 4), pady=4)
 
-            tk.Label(row, text=label, bg=bg, fg=TEXT_PRI,
-                     font=self.FBODY, width=34, anchor="w").pack(side="left", padx=4)
-            tk.Label(row, textvariable=self.param_cur[idx], bg=bg, fg=ACCENT3,
-                     font=self.FBODY, width=16, anchor="w").pack(side="left", padx=4)
-            for var in [self.param_lo[idx], self.param_hi[idx]]:
-                tk.Entry(row, textvariable=var, bg=BG_INPUT, fg=TEXT_PRI,
-                         insertbackground=TEXT_PRI, relief="flat",
-                         font=self.FBODY, width=13).pack(side="left", padx=4, ipady=4)
-            tk.Label(row, text=unit, bg=bg, fg=TEXT_DIM,
-                     font=self.FSMALL, width=6).pack(side="left")
+            lbl = tk.Label(row, text=label, bg=bg,
+                           fg=TEXT_PRI if self.param_available.get(idx, True) else TEXT_DIM,
+                           font=self.FBODY, width=34, anchor="w")
+            lbl.pack(side="left", padx=4)
+
+            cur_lbl = tk.Label(row, textvariable=self.param_cur[idx], bg=bg,
+                               fg=ACCENT3 if self.param_available.get(idx, True) else TEXT_DIM,
+                               font=self.FBODY, width=16, anchor="w")
+            cur_lbl.pack(side="left", padx=4)
+
+            lo_entry = tk.Entry(row, textvariable=self.param_lo[idx], bg=BG_INPUT, fg=TEXT_PRI,
+                                insertbackground=TEXT_PRI, relief="flat",
+                                font=self.FBODY, width=13)
+            lo_entry.pack(side="left", padx=4, ipady=4)
+
+            hi_entry = tk.Entry(row, textvariable=self.param_hi[idx], bg=BG_INPUT, fg=TEXT_PRI,
+                                insertbackground=TEXT_PRI, relief="flat",
+                                font=self.FBODY, width=13)
+            hi_entry.pack(side="left", padx=4, ipady=4)
+
+            unit_lbl = tk.Label(row, text=_display_unit_for_param(idx, self.dim_system), bg=bg,
+                                fg=TEXT_DIM if self.param_available.get(idx, True) else BORDER,
+                                font=self.FSMALL, width=6)
+            unit_lbl.pack(side="left")
+
+            self._param_widgets[idx] = {
+                "row": row,
+                "checkbox": cb,
+                "label": lbl,
+                "current": cur_lbl,
+                "lo": lo_entry,
+                "hi": hi_entry,
+                "unit": unit_lbl,
+                "bg": bg,
+            }
+
+            self._apply_param_widget_state(idx)
+
+    def _apply_param_widget_state(self, idx):
+        if idx not in self._param_widgets:
+            return
+        widgets = self._param_widgets[idx]
+        available = self.param_available.get(idx, True)
+        widgets["checkbox"].set_enabled(available)
+        if not available:
+            self.param_enabled[idx].set(False)
+        state = "normal" if available else "disabled"
+        widgets["lo"].config(state=state,
+                             disabledbackground=BG_INPUT,
+                             disabledforeground=TEXT_DIM)
+        widgets["hi"].config(state=state,
+                             disabledbackground=BG_INPUT,
+                             disabledforeground=TEXT_DIM)
+        widgets["label"].config(fg=TEXT_PRI if available else TEXT_DIM)
+        widgets["current"].config(fg=ACCENT3 if available else TEXT_DIM)
+        widgets["unit"].config(fg=TEXT_DIM if available else BORDER)
+
+    def _sync_param_availability(self):
+        for idx in self.param_available:
+            self.param_available[idx] = True
+
+        for section_name, cfg in SURFACE_CONFIG.items():
+            if self.surface_panel_type.get(section_name, "two") == "single":
+                for idx in cfg["required_two"]:
+                    self.param_available[idx] = False
+
+        if self._param_widgets:
+            for idx in self._param_widgets:
+                self._apply_param_widget_state(idx)
+
+    def _set_initial_percent_bounds(self, pct=0.05):
+        if not self.inp_vals:
+            return
+        for (idx, _label, _unit, scale, _section) in PARAM_DEFS:
+            if idx >= len(self.inp_vals):
+                continue
+            if not self.param_available.get(idx, True):
+                self.param_lo[idx].set("")
+                self.param_hi[idx].set("")
+                continue
+
+            val = self.inp_vals[idx]
+            if abs(val) < 1e-12:
+                if idx in DEFAULT_BOUNDS:
+                    lo, hi = DEFAULT_BOUNDS[idx]
+                else:
+                    lo, hi = -pct, pct
+            else:
+                delta = abs(val) * pct
+                lo = min(val - delta, val + delta)
+                hi = max(val - delta, val + delta)
+
+            self.param_lo[idx].set(f"{lo * scale:.4f}")
+            self.param_hi[idx].set(f"{hi * scale:.4f}")
 
     # ── Tab 3: Cost Function ──────────────────────────────────────────
     def _tab_cost(self, p):
@@ -755,7 +1146,11 @@ class DatcomApp(tk.Tk):
         return f
 
     def _tog_all(self, v):
-        for bv in self.param_enabled.values(): bv.set(v)
+        for idx, bv in self.param_enabled.items():
+            if self.param_available.get(idx, True):
+                bv.set(v)
+            else:
+                bv.set(False)
 
     # ── File ops ──────────────────────────────────────────────────────
     def _browse(self):
@@ -778,7 +1173,7 @@ class DatcomApp(tk.Tk):
         if not path or not os.path.exists(path):
             messagebox.showerror("Error","Please enter a valid file path.")
             return
-        inp, zv, wt, ok, err = parse_for005(path)
+        inp, zv, wt, ok, err, surface_types, dim_system = parse_for005(path)
         if not ok:
             messagebox.showerror("Parse Error", f"Could not parse file:\n{err}")
             return
@@ -802,6 +1197,10 @@ class DatcomApp(tk.Tk):
         self._initial_inp = list(inp)
         self.zv_val       = zv
         self.wt_val       = wt
+        self.surface_panel_type.update(surface_types)
+        self.dim_system   = dim_system
+        self._sync_param_availability()
+        self._build_param_rows()
 
         with open(path) as f:
             self.preview.delete("1.0","end")
@@ -810,14 +1209,14 @@ class DatcomApp(tk.Tk):
         self.alschd_label.config(text=f"ALSCHD = {inp[0]*10:.2f}  deg")
 
         for (idx,label,unit,scale,_) in PARAM_DEFS:
-            self.param_cur[idx].set(f"{inp[idx]*scale:.4f} {unit}")
-            lo, hi = DEFAULT_BOUNDS[idx]
-            self.param_lo[idx].set(f"{lo*scale:.4f}")
-            self.param_hi[idx].set(f"{hi*scale:.4f}")
+            disp_unit = _display_unit_for_param(idx, self.dim_system)
+            self.param_cur[idx].set(f"{inp[idx]*scale:.4f} {disp_unit}")
+        self._set_initial_percent_bounds(0.05)
 
         messagebox.showinfo("Loaded",
             f"File parsed successfully.\n32 parameters read.\n"
-            f"ZV = {zv:.5f} m    WT = {wt:.1f} N\n\n"
+            f"DIM = {self.dim_system}\n"
+            f"ZV = {zv:.5f} {'m' if self.dim_system == 'M' else 'ft'}    WT = {wt:.1f} {'N' if self.dim_system == 'M' else 'lbf'}\n\n"
             f"Original file will NOT be modified during optimization.\n"
             f"A temporary working copy is used for each DATCOM evaluation.")
 
@@ -828,6 +1227,39 @@ class DatcomApp(tk.Tk):
 
     def _clear_log(self):
         self.log.delete("1.0","end")
+    def _extract_current_sref_from_file(self, dat_path):
+        try:
+            with open(dat_path, "r") as f:
+                txt = f.read()
+            m = re.search(r'\bSREF\s*=\s*([^,\n\r$]+)', txt, re.IGNORECASE)
+            if m:
+                return float(m.group(1).strip())
+        except Exception:
+            pass
+        return REF_SREF_FORCED
+
+    def _ask_sref_manipulation(self, zero_fields):
+        fields_txt = ", ".join(zero_fields) if zero_fields else "CL/CD/CM"
+        result = {"apply": False}
+        done = threading.Event()
+
+        def _prompt():
+            try:
+                msg = (
+                    f"DATCOM çıktısında şu katsayı(lar) 0.000 okundu: {fields_txt}.\n\n"
+                    "Bu bir çözünürlük / yuvarlama problemi olabilir.\n"
+                    "SREF manipülasyonu uygulansın mı?\n\n"
+                    "Evet -> SREF=10 zorlanır ve eski /10 /1000 ölçek mantığı uygulanır.\n"
+                    "Hayır -> kullanıcı SREF'i aynen korunur."
+                )
+                result["apply"] = messagebox.askyesno("SREF Manipulation", msg)
+            finally:
+                done.set()
+
+        self.after(0, _prompt)
+        done.wait()
+        return bool(result["apply"])
+
 
     # ── Opt control ───────────────────────────────────────────────────
     def _start(self):
@@ -850,6 +1282,8 @@ class DatcomApp(tk.Tk):
         self._running    = True
         self._iter_count = 0
         self._best_score = float('inf')
+        self._sref_manipulation_enabled = False
+        self._sref_manipulation_decided = False
         self.run_btn.config(state="disabled")
         self.prog.start(14)
         self.status_lbl.config(text="Running...")
@@ -864,9 +1298,20 @@ class DatcomApp(tk.Tk):
 
     def _finish(self, msg="Done"):
         self._running = False
+        self._cleanup_datcom_outputs()
         self.after(0, self.prog.stop)
         self.after(0, lambda: self.status_lbl.config(text=msg))
         self.after(0, lambda: self.run_btn.config(state="normal"))
+
+    def _cleanup_datcom_outputs(self):
+        work_dir = os.path.dirname(self.datcom_exe.get().strip()) if self.datcom_exe.get().strip() else os.getcwd()
+        for name in ("datcom.out", "for0013.dat", "for0014.dat"):
+            try:
+                fp = os.path.join(work_dir, name)
+                if os.path.exists(fp):
+                    os.remove(fp)
+            except Exception:
+                pass
 
     def _opt_thread(self):
         try:
@@ -922,17 +1367,19 @@ class DatcomApp(tk.Tk):
         both(f"  Cost expr    : {cost_expr}")
         both("-"*70)
 
-        _wa  = max((inp[3]*100)*(inp[8]*100), 0.01)
-        _rCL = 2*wt/(_wa*1.225*102.0**2)
-        both(f"  rCL estimate : {_rCL:.4f}  (required lift coeff for level flight)")
+        native_sref = self._extract_current_sref_from_file(dat_path)
+        _wa_si = _area_to_si(max(native_sref, 1e-12), self.dim_system)
+        _wt_si = _weight_to_si(wt, self.dim_system)
+        _rCL = 2*_wt_si/(_wa_si*1.225*102.0**2) if _wa_si else 1e6
+        both(f"  rCL estimate : {_rCL:.4f}  (rough estimate using input SREF)")
         if _rCL > 1.0:
-            both(f"  NOTE: soft penalty active while CL < rCL", "warn")
+            both("  NOTE: hard lift constraint active -> if CL < rCL, score = 1e6", "warn")
         both("-"*70)
 
         # Collect active params
         active_idx, active_lo, active_hi = [], [], []
         for (idx,label,unit,scale,_) in PARAM_DEFS:
-            if self.param_enabled[idx].get():
+            if self.param_available.get(idx, True) and self.param_enabled[idx].get():
                 try:
                     lo = float(self.param_lo[idx].get())/scale
                     hi = float(self.param_hi[idx].get())/scale
@@ -1006,11 +1453,11 @@ class DatcomApp(tk.Tk):
                     best_score = score
                     best_vals  = dict(CL=CL,CD=CD,CM=CM,rCL=rCL)
                     self.after(0, lambda s=score: self._sv['score'].set(f"{s:.5f}"))
-                    self.after(0, lambda: [
-                        self._sv['cl' ].set(f"{best_vals['CL']:.4f}"),
-                        self._sv['cd' ].set(f"{best_vals['CD']:.4f}"),
-                        self._sv['cm' ].set(f"{best_vals['CM']:.4f}"),
-                        self._sv['rcl'].set(f"{best_vals['rCL']:.4f}"),
+                    self.after(0, lambda bv=dict(best_vals): [
+                        self._sv['cl' ].set(f"{bv['CL']:.4f}"),
+                        self._sv['cd' ].set(f"{bv['CD']:.4f}"),
+                        self._sv['cm' ].set(f"{bv['CM']:.4f}"),
+                        self._sv['rcl'].set(f"{bv['rCL']:.4f}"),
                     ])
                 return score
 
@@ -1083,10 +1530,6 @@ class DatcomApp(tk.Tk):
 
     # ── Single DATCOM evaluation — uses temp copy, never original ─────
     def _evaluate(self, inp, zv, wt, orig_dat, tmp_dat, exe_dir, cost_expr, fixed_zv):
-        # Fresh copy from original every time
-        shutil.copy2(orig_dat, tmp_dat)
-        write_inp_to_dat(inp, tmp_dat, fixed_zv, zv)
-
         exe_path = self.datcom_exe.get().strip()
         exe = exe_path if exe_path else os.path.join(exe_dir, "digital_DATCOM.exe")
         if not os.path.exists(exe):
@@ -1096,68 +1539,111 @@ class DatcomApp(tk.Tk):
         work_dat = os.path.join(exe_dir, "for005.dat")
         bak_dat = os.path.join(exe_dir, "for005._gui_backup.dat")
         had_original = os.path.exists(work_dat)
+        native_sref = self._extract_current_sref_from_file(orig_dat)
 
-        # remove stale output
-        try:
-            if os.path.exists(out_path):
-                os.remove(out_path)
-        except Exception:
-            pass
+        def _run_datcom_once(force_sref_manipulation):
+            shutil.copy2(orig_dat, tmp_dat)
+            write_inp_to_dat(inp, tmp_dat, fixed_zv, zv, force_sref_manipulation=force_sref_manipulation)
 
-        # place current input where DATCOM expects it
-        try:
-            if had_original:
-                shutil.copy2(work_dat, bak_dat)
-            shutil.copy2(tmp_dat, work_dat)
-
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            si.wShowWindow = subprocess.SW_HIDE
-            subprocess.Popen(exe, startupinfo=si, cwd=exe_dir)
-
-            # wait for output to appear and settle
-            t0 = time.time()
-            last_size = -1
-            stable_hits = 0
-            while time.time() - t0 < 20.0:
-                if os.path.exists(out_path):
-                    sz = os.path.getsize(out_path)
-                    if sz > 0 and sz == last_size:
-                        stable_hits += 1
-                        if stable_hits >= 2:
-                            break
-                    else:
-                        stable_hits = 0
-                    last_size = sz
-                time.sleep(0.25)
-
-            if not os.path.exists(out_path):
-                raise FileNotFoundError(f"datcom.out was not created in: {exe_dir}")
-
-            CL,CD,CM,wing_area,velocity,density = read_datcom_out(out_path)
-        finally:
-            # restore original for005.dat if there was one
             try:
-                if had_original and os.path.exists(bak_dat):
-                    shutil.copy2(bak_dat, work_dat)
-                    os.remove(bak_dat)
-                elif (not had_original) and os.path.exists(work_dat):
-                    os.remove(work_dat)
+                if os.path.exists(out_path):
+                    os.remove(out_path)
             except Exception:
                 pass
 
-        rCL = 2*wt/(wing_area*density*velocity**2) if (wing_area*density*velocity) else 1e6
+            try:
+                if had_original:
+                    shutil.copy2(work_dat, bak_dat)
+                shutil.copy2(tmp_dat, work_dat)
+
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                subprocess.Popen(exe, startupinfo=si, cwd=exe_dir)
+
+                t0 = time.time()
+                last_size = -1
+                stable_hits = 0
+                while time.time() - t0 < 20.0:
+                    if os.path.exists(out_path):
+                        sz = os.path.getsize(out_path)
+                        if sz > 0 and sz == last_size:
+                            stable_hits += 1
+                            if stable_hits >= 2:
+                                break
+                        else:
+                            stable_hits = 0
+                        last_size = sz
+                    time.sleep(0.25)
+
+                if not os.path.exists(out_path):
+                    raise FileNotFoundError(f"datcom.out was not created in: {exe_dir}")
+
+                return read_datcom_out(out_path, apply_sref_manipulation=force_sref_manipulation, dim_system=self.dim_system)
+            finally:
+                try:
+                    if had_original and os.path.exists(bak_dat):
+                        shutil.copy2(bak_dat, work_dat)
+                        os.remove(bak_dat)
+                    elif (not had_original) and os.path.exists(work_dat):
+                        os.remove(work_dat)
+                except Exception:
+                    pass
+
+        result = _run_datcom_once(self._sref_manipulation_enabled)
+        if (not self._sref_manipulation_enabled) and result.get("zero_detected", False) and (not self._sref_manipulation_decided):
+            self._sref_manipulation_decided = True
+            self._sref_manipulation_enabled = self._ask_sref_manipulation(result.get("zero_fields", []))
+            if self._sref_manipulation_enabled:
+                result = _run_datcom_once(True)
+
+        CL = result["CL"]
+        CD = result["CD"]
+        CM = result["CM"]
+        theoretical_wing_area = result["theoretical_wing_area"]
+        reference_area = result.get("reference_area", native_sref)
+        velocity = result["velocity"]
+        density = result["density"]
+        rCL = result.get("rCL")
+        if rCL is None:
+            # Fallback only if DATCOM did not print the level-flight CL.
+            area_for_rcl = theoretical_wing_area if result.get("sref_manipulation_applied", False) else reference_area
+            wing_area_si = _area_to_si(area_for_rcl, self.dim_system)
+            velocity_si = _velocity_to_si(velocity, self.dim_system)
+            wt_si = _weight_to_si(wt, self.dim_system)
+            rCL = 2*wt_si/(wing_area_si*density*velocity_si**2) if (wing_area_si*density*velocity_si) else 1e6
+        used_sref = REF_SREF_FORCED if result.get("sref_manipulation_applied", False) else reference_area
+        self._last_eval_meta = {
+            "forced_sref": REF_SREF_FORCED,
+            "used_sref": used_sref,
+            "reference_area": reference_area,
+            "theoretical_wing_area": theoretical_wing_area,
+            "wing_area": theoretical_wing_area,
+            "velocity": velocity,
+            "density": density,
+            "level_flight_cl": result.get("level_flight_cl"),
+            "rCL": rCL,
+            "sref_manipulation_applied": result.get("sref_manipulation_applied", False),
+            "zero_detected": result.get("zero_detected", False),
+            "zero_fields": result.get("zero_fields", []),
+        }
 
         try:
             base = float(eval(cost_expr, {"__builtins__":{}}, {
                 "CL":CL,"CD":CD,"CM":CM,"rCL":rCL,
-                "wing_area":wing_area,"velocity":velocity,
+                "wing_area":theoretical_wing_area,"theoretical_wing_area":theoretical_wing_area,
+                "sref":used_sref,"forced_sref":REF_SREF_FORCED,
+                "velocity":velocity,
                 "density":density,"weight":wt,"abs":abs,"math":math}))
         except:
             base = 1e6
 
-        score = base + 1000.0*(1.0+(rCL-CL)) if rCL > CL else base
+        if CL < rCL:
+            score = 1e6
+        else:
+            score = base
         return score, CL, CD, CM, rCL
+
 
 
     # ── Tab 6: Aircraft View ──────────────────────────────────────────
