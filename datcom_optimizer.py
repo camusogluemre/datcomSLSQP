@@ -706,6 +706,7 @@ class DatcomApp(tk.Tk):
         self._final_inp       = []   # set after optimization
         self._sref_manipulation_enabled = False
         self._sref_manipulation_decided = False
+        self._cbarr_explicit = False
 
         # Aero Sweep tab state
         self._sweep_running   = False
@@ -1201,6 +1202,7 @@ class DatcomApp(tk.Tk):
         self.wt_val       = wt
         self.surface_panel_type.update(surface_types)
         self.dim_system   = dim_system
+        self._cbarr_explicit = self._input_has_explicit_cbarr(path)
         self._sync_param_availability()
         self._build_param_rows()
 
@@ -1215,12 +1217,14 @@ class DatcomApp(tk.Tk):
             self.param_cur[idx].set(f"{inp[idx]*scale:.4f} {disp_unit}")
         self._set_initial_percent_bounds(0.05)
 
+        cbarr_note = "\n\nWARNING: Explicit CBARR detected in input.\nCM area-only scaling is not valid in this case, so optimization/sweep with scaling is blocked." if self._cbarr_explicit else ""
         messagebox.showinfo("Loaded",
             f"File parsed successfully.\n32 parameters read.\n"
             f"DIM = {self.dim_system}\n"
             f"WT = {wt:.1f} {'N' if self.dim_system == 'M' else 'lbf'}\n\n"
             f"Original file will NOT be modified during optimization.\n"
-            f"A temporary working copy is used for each DATCOM evaluation.")
+            f"A temporary working copy is used for each DATCOM evaluation."
+            f"{cbarr_note}")
 
     # ── Logging ───────────────────────────────────────────────────────
     def _log(self, msg, tag="info"):
@@ -1239,6 +1243,14 @@ class DatcomApp(tk.Tk):
         except Exception:
             pass
         return REF_SREF_FORCED
+
+    def _input_has_explicit_cbarr(self, dat_path):
+        try:
+            with open(dat_path, "r") as f:
+                txt = f.read()
+            return bool(re.search(r'\bCBARR\s*=', txt, re.IGNORECASE))
+        except Exception:
+            return False
 
     def _ask_sref_manipulation(self, zero_fields):
         fields_txt = ", ".join(zero_fields) if zero_fields else "CL/CD/CM"
@@ -1280,6 +1292,13 @@ class DatcomApp(tk.Tk):
                     myfuncs.set_datcom_dat_path(self.dat_file.get().strip())
             except Exception:
                 pass
+        if self._cbarr_explicit:
+            messagebox.showerror(
+                "CBARR Detected",
+                "CM area-only scaling is not valid when CBARR is explicitly defined in the DATCOM input.\n\n"
+                "Please remove CBARR from the input or disable/replace the current CM scaling approach."
+            )
+            return
         if self._running: return
         self._running    = True
         self._iter_count = 0
@@ -1604,6 +1623,21 @@ class DatcomApp(tk.Tk):
         reference_area = result.get("reference_area", native_sref)
         velocity = result["velocity"]
         density = result["density"]
+
+        if self._cbarr_explicit:
+            raise ValueError(
+                "CM area-only scaling is not valid when CBARR is explicitly defined in the DATCOM input."
+            )
+
+        # Apply geometric-consistency scaling so that DATCOM coefficients,
+        # originally normalized by the fixed input SREF, are evaluated with
+        # respect to the current theoretical wing area of the iterated geometry.
+        if theoretical_wing_area and reference_area:
+            area_ratio = reference_area / max(theoretical_wing_area, 1e-12)
+            CL *= area_ratio
+            CD *= area_ratio
+            CM *= area_ratio
+
         # rCL is always recomputed from the current theoretical wing area.
         # Units are normalized to SI so both DIM M and DIM FT cases stay correct:
         #   rCL = 2*W / (rho * V^2 * S_theoretical)
@@ -1622,6 +1656,7 @@ class DatcomApp(tk.Tk):
             "velocity": velocity,
             "density": density,
             "level_flight_cl": result.get("level_flight_cl"),
+            "area_ratio": (reference_area / max(theoretical_wing_area, 1e-12)) if theoretical_wing_area else 1.0,
             "rCL": rCL,
             "sref_manipulation_applied": result.get("sref_manipulation_applied", False),
             "zero_detected": result.get("zero_detected", False),
@@ -1984,6 +2019,13 @@ class DatcomApp(tk.Tk):
             messagebox.showerror("Error",
                 "Please select a valid digital_DATCOM.exe path first.")
             return
+        if self._cbarr_explicit:
+            messagebox.showerror(
+                "CBARR Detected",
+                "CM area-only scaling is not valid when CBARR is explicitly defined in the DATCOM input.\n\n"
+                "Please remove CBARR from the input or disable/replace the current CM scaling approach."
+            )
+            return
         if self._sweep_running:
             return
 
@@ -2100,6 +2142,18 @@ class DatcomApp(tk.Tk):
                             f"datcom.out not created (sweep:{label})")
 
                     data, vel, pres, temp = parse_sweep_out(out_path, alphas)
+
+                    # Apply the same geometric-consistency scaling used during
+                    # optimization so that sweep curves are directly comparable.
+                    out_meta = read_datcom_out(out_path, apply_sref_manipulation=False, dim_system=self.dim_system)
+                    sweep_ref_area = out_meta.get("reference_area", self._extract_current_sref_from_file(dat_path))
+                    sweep_theoretical_area = out_meta.get("theoretical_wing_area", sweep_ref_area)
+                    if sweep_theoretical_area and sweep_ref_area:
+                        sweep_ratio = sweep_ref_area / max(sweep_theoretical_area, 1e-12)
+                        for row in data:
+                            row["CL"] *= sweep_ratio
+                            row["CD"] *= sweep_ratio
+                            row["CM"] *= sweep_ratio
 
                 finally:
                     try:
