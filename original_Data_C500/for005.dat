@@ -1,0 +1,46 @@
+CASEID Citation II Model 550 Aircraft                                           
+DIM FT                                                                                                                                                     
+ $FLTCON LOOP=1.0,                                                              
+  NMACH=1.0, MACH(1)=0.6,                                                
+  NALT=1.0, ALT(1)=30000.0,                                                  
+  NALPHA=10.0, ALSCHD(1)=-6.0,-4.0,-2.0,0.0,2.0,4.0,
+  6.0,8.0,10.0,12.0,
+  STMACH=0.8, WT=9149.0$                                        
+ $OPTINS SREF=320.8, BLREF=51.7$                    
+ $SYNTHS XCG=21.9, ZCG=3.125,                                                   
+          XW=19.1,  ZW=3.125,  ALIW=2.5,                                         
+          XH=39.2,  ZH=7.75,   ALIH=0.0,                                         
+          XV=36.0,  ZV=6.0,                                                      
+          XVF=28.0, ZVF=7.4,                                                     
+          SCALE=1.0, VERTUP=.TRUE.$                                              
+ $BODY NX=8.0,                                                                  
+        X(1)=0.0,1.0,2.7,6.0,8.8,28.5,39.4,44.8,                                 
+        R(1)=0.0,1.25,2.1,2.7,2.76,2.7,1.25,0.0,                                 
+        ZU(1)=3.5,4.3,4.8,5.5,7.4,7.4,6.5,5.7,                                   
+        ZL(1)=3.5,2.5,2.25,2.1,2.0,2.2,4.3,5.7,                                  
+        BNOSE=1.0, BLN=8.8,                                                      
+        BTAIL=1.0, BLA=19.7,                                                     
+        ITYPE=1.0, METHOD=1.0$                                                   
+ $WGPLNF CHRDR=9.4,   CHRDTP=3.01,                                              
+          SSPN=25.85,  SSPNE=23.46,                                              
+          SAVSI=1.3,                                                             
+          CHSTAT=0.25, TWISTA=-3.0,                                              
+          DHDADI=3.6,                                                            
+          TYPE=1.0$                                                                                                                               
+ $HTPLNF CHRDR=4.99, CHRDTP=2.48,                                               
+          SSPN=9.42, SSPNE=9.21,                                                 
+          SAVSI=5.32,                                                            
+          CHSTAT=0.25, TWISTA=0.0,                                               
+          DHDADI=9.2,                                                            
+          TYPE=1.0$                                                              
+ $VTPLNF CHRDTP=3.63, SSPNE=8.85,  SSPN=9.42, CHRDR=8.3,                        
+          SAVSI=32.3,  CHSTAT=0.25, TWISTA=0.0, TYPE=1.0$                                    
+ $VFPLNF CHRDR=11.8, CHRDTP=0.0, CHSTAT=0.0, DHDADO=0.0,                        
+          SAVSI=80.0, SSPN=2.3,  SSPNE=2.1, TYPE=1.0$                               
+NACA-W-5-23014                                                                  
+NACA-H-4-0010                                                                   
+NACA-V-4-0012                                                                   
+NACA-F-4-0012  		  
+DAMP
+PART
+NEXT CASE 
