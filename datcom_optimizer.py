@@ -1619,6 +1619,19 @@ class DatcomApp(tk.Tk):
         opt_dat = os.path.join(out_folder, "for005_optimized.dat")
         shutil.copy2(dat_path, opt_dat)
         write_inp_to_dat(final_inp, opt_dat, fixed_zv, zv)
+        # Save the final (last-computed) theoretical wing area as SREF so the
+        # standalone optimized dat reproduces the area-normalized coefficients
+        # the tool reported, instead of keeping the original input SREF.
+        if s_theoretical_a and s_theoretical_a > 1e-9:
+            with open(opt_dat, 'r') as f:
+                _opt_txt = f.read()
+            _opt_txt, _nsref = re.subn(
+                r'(\bSREF\s*=\s*)([^,\n\r$]+)',
+                rf'\g<1>{s_theoretical_a:.5f}', _opt_txt, flags=re.IGNORECASE)
+            if _nsref:
+                with open(opt_dat, 'w') as f:
+                    f.write(_opt_txt)
+                both(f"  SREF set to final theoretical wing area: {s_theoretical_a:.5f}", "ok")
         both(f"\n  Optimized dat  ->  {opt_dat}", "ok")
 
         csv_path = os.path.join(out_folder, "parameters_before_after.csv")
