@@ -43,6 +43,10 @@ YELLOW   = "#d29922"
 REF_SREF_FORCED = 10.0
 CM_SREF_SCALE = 1000.0
 
+# Fraction of the wing MAC at which XCG (pitching-moment reference) is placed.
+# 0.25 = quarter-chord of the mean aerodynamic chord.
+MAC_CG_FRACTION = 0.25
+
 # ── Parameter definitions (idx 0 = ALSCHD excluded from opt) ────────
 PARAM_DEFS = [
     ( 1,"Wing - SAVSI  (inner sweep)","deg", 1000,"Wing"),
@@ -312,6 +316,94 @@ def parse_for005(filepath):
         return [], 0.017, 26500.0, False, traceback.format_exc(), {}, 'FT'
 
 
+# ── Wing MAC / XCG helpers ───────────────────────────────────────────
+def _namelist_body(text, name):
+    """Return the body (between $NAME and the closing $) of a namelist block."""
+    m = re.search(rf'\${name}\b(.*?)\$', text, re.IGNORECASE | re.DOTALL)
+    return m.group(1) if m else ''
+
+
+def _find_scalar_in(body, kw):
+    """First numeric value of `kw` inside a namelist body, or None."""
+    m = re.search(rf'\b{re.escape(kw)}\s*=\s*([^,\n\r$]+)', body, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).strip())
+    except ValueError:
+        return None
+
+
+def _panel_mac_integrals(c0, c1, span, xle0, xle1):
+    """
+    Chord-weighted integrals for one linearly-tapered panel.
+    c0/c1   : root/tip chord of the panel
+    span    : panel semi-span
+    xle0/xle1: absolute leading-edge X at the panel root/tip
+    Returns (S, Ic2, xle_bar) where
+        S       = INT c dy                  (panel area integral)
+        Ic2     = INT c^2 dy
+        xle_bar = chord-weighted mean LE X over the panel
+    """
+    if span <= 0 or (c0 + c1) <= 0:
+        return 0.0, 0.0, xle0
+    S = span * (c0 + c1) / 2.0
+    Ic2 = span * (c0 * c0 + c0 * c1 + c1 * c1) / 3.0
+    # Spanwise MAC station (from panel root); LE varies linearly so the
+    # chord-weighted mean LE is the LE evaluated at that station.
+    ybar = span * (c0 + 2.0 * c1) / (3.0 * (c0 + c1))
+    xle_bar = xle0 + (xle1 - xle0) * (ybar / span)
+    return S, Ic2, xle_bar
+
+
+def _compute_wing_xcg(text, chrdr, chrdtp, chrdbp, sspn, sspnop, savsi, savso,
+                      mac_frac=MAC_CG_FRACTION):
+    """
+    XCG placed at `mac_frac` of the wing mean aerodynamic chord, recomputed
+    from the current planform. Uses the same LE convention as the aircraft
+    view (_wing_planform): sweep referenced at CHSTAT, two-panel split at
+    bp = SSPN - SSPNOP. Returns None if the inputs needed are unavailable.
+    """
+    xw = _find_scalar_in(_namelist_body(text, 'SYNTHS'), 'XW')
+    wing = _namelist_body(text, 'WGPLNF')
+    if xw is None or not wing:
+        return None
+    chstat = _find_scalar_in(wing, 'CHSTAT')
+    if chstat is None:
+        chstat = 0.0
+    wtype = _find_scalar_in(wing, 'TYPE')
+
+    tsi = math.tan(math.radians(savsi))
+    two_panel = (wtype is not None and wtype != 1) and chrdbp > 0 and sspnop > 0
+
+    if two_panel:
+        bp = sspn - sspnop
+        if bp <= 0:
+            two_panel = False
+    if two_panel:
+        tso = math.tan(math.radians(savso))
+        xle_root = xw
+        xle_bp = xw + chstat * chrdr + bp * tsi - chstat * chrdbp
+        xle_tip = xw + chstat * chrdr + bp * tsi + sspnop * tso - chstat * chrdtp
+        S1, Ic2_1, xle1 = _panel_mac_integrals(chrdr, chrdbp, bp, xle_root, xle_bp)
+        S2, Ic2_2, xle2 = _panel_mac_integrals(chrdbp, chrdtp, sspnop, xle_bp, xle_tip)
+        S_tot = S1 + S2
+        Ic2_tot = Ic2_1 + Ic2_2
+        xle_num = xle1 * S1 + xle2 * S2
+    else:
+        xle_root = xw
+        xle_tip = xw + chstat * chrdr + sspn * tsi - chstat * chrdtp
+        S_tot, Ic2_tot, xle_bar = _panel_mac_integrals(chrdr, chrdtp, sspn,
+                                                       xle_root, xle_tip)
+        xle_num = xle_bar * S_tot
+
+    if S_tot <= 0:
+        return None
+    mac = Ic2_tot / S_tot
+    xle_mac = xle_num / S_tot
+    return xle_mac + mac_frac * mac
+
+
 # ── Write inp vector to a dat file ───────────────────────────────────
 def write_inp_to_dat(inp, dat_path, fixed_zv, zv_orig, force_sref_manipulation=False):
     with open(dat_path, 'r') as f:
@@ -358,7 +450,17 @@ def write_inp_to_dat(inp, dat_path, fixed_zv, zv_orig, force_sref_manipulation=F
         zh_val = inp[31] * length_scale
         text = re.sub(r'(\bZH\s*=\s*)([^,\n\r$]+)', rf'\g<1>{fmt(zh_val)}', text, flags=re.IGNORECASE)
 
-
+    # Recompute XCG (pitching-moment reference) at MAC_CG_FRACTION of the wing
+    # MAC so it tracks the iterated geometry instead of staying at the fixed
+    # input value. Uses the wing planform values written just above.
+    xcg_val = _compute_wing_xcg(
+        text,
+        chrdr=inp[8] * length_scale,  chrdtp=inp[10] * length_scale,
+        chrdbp=inp[9] * length_scale, sspn=inp[3] * length_scale,
+        sspnop=inp[4] * length_scale, savsi=inp[1] * 1000, savso=inp[2] * 1000)
+    if xcg_val is not None:
+        text = re.sub(r'(\bXCG\s*=\s*)([^,\n\r$]+)', rf'\g<1>{fmt(xcg_val)}', text,
+                      flags=re.IGNORECASE)
 
     with open(dat_path, 'w') as f:
         f.write(text)
