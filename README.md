@@ -1,4 +1,4 @@
-# DATCOM Wing Optimization Tool
+# DATCOM Optimization Tool
 
 A desktop GUI for aerodynamic shape optimization of aircraft lifting surfaces
 using **Digital DATCOM** as the aerodynamic solver and **SLSQP**
